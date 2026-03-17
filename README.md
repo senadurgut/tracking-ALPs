@@ -53,6 +53,26 @@ pip install numpy scipy sympy pandas matplotlib
 
 Python ≥ 3.8 is required. No other non-standard dependencies are needed.
 
+### MadGraph (required for Step 1)
+
+This repository does **not** generate events by itself. Install MadGraph5_aMC@NLO separately, for example:
+
+```bash
+cd /path/to/ALP
+mkdir -p tools
+wget -O tools/MG5_aMC_v3.5.13.tar.gz https://launchpad.net/mg5amcnlo/3.0/3.6.x/+download/MG5_aMC_v3.5.13.tar.gz
+tar -xzf tools/MG5_aMC_v3.5.13.tar.gz -C tools
+```
+
+You also need a Fortran compiler (`gfortran`) available in your `PATH` for event generation.
+
+Quick check:
+
+```bash
+cd /path/to/ALP/tools/MG5_aMC_v3_5_13
+./bin/mg5_aMC --help
+```
+
 ---
 
 ## Quick start
