@@ -66,6 +66,19 @@ tar -xzf tools/MG5_aMC_v3.5.13.tar.gz -C tools
 
 You also need a Fortran compiler (`gfortran`) available in your `PATH` for event generation.
 
+Install `gfortran` (examples):
+
+```bash
+# macOS (Homebrew)
+brew install gcc
+
+# Ubuntu/Debian
+sudo apt-get install gfortran
+
+# verify
+which gfortran && gfortran --version
+```
+
 Quick check:
 
 ```bash
