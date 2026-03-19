@@ -93,7 +93,7 @@ cd /path/to/ALP/tools/MG5_aMC_v3_5_13
 ### Step 1 — Run Madgraph
 
 Generate VBF→ALP→γγ events for each ALP mass using your Madgraph UFO model.
-The code expects the ALP PDG ID to be `9000005` (edit `ALP_PDG_ID` in `lhe_to_csv.py` if yours differs).
+The code expects the ALP PDG ID to be `36` (edit `ALP_PDG_ID` in `lhe_to_csv.py` if yours differs).
 
 ### Step 2 — Convert LHE files to CSV
 
