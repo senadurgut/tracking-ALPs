@@ -18,7 +18,7 @@ The particle order written per event is:
     Row 1: incoming parton 2        (status = -1)
     Row 2: VBF jet 1                (status =  1, not ALP/photon)
     Row 3: VBF jet 2                (status =  1, not ALP/photon)
-    Row 4: ALP  (PDG ID = 9000005)  (status =  1)
+    Row 4: ALP  (PDG ID = 36)  (status =  1)
     Row 5: photon 1 (PDG ID = 22)   (status =  1)
     Row 6: photon 2 (PDG ID = 22)   (status =  1)
 
@@ -41,10 +41,10 @@ Example
 
 Notes
 -----
-- The script expects exactly 2 photons (PDG 22) and 1 ALP (PDG 9000005) among
+- The script expects exactly 2 photons (PDG 22) and 1 ALP (PDG 36) among
   the final-state particles.  Events that do not match this topology are
   skipped with a warning.
-- The ALP PDG ID (9000005) can be changed via the ``ALP_PDG_ID`` constant
+- The ALP PDG ID (36) can be changed via the ``ALP_PDG_ID`` constant
   below if your UFO model uses a different code.
 - The script is intentionally kept self-contained (stdlib + standard LHE
   parsing) so it can be run in any environment without extra dependencies.
@@ -58,7 +58,7 @@ from xml.etree import ElementTree as ET
 
 
 # ── Change this if your UFO model uses a different PDG code for the ALP ──
-ALP_PDG_ID = 9000005
+ALP_PDG_ID = 36#9000005
 PHOTON_PDG_ID = 22
 
 
@@ -137,7 +137,7 @@ def _process_event(particles):
                 if status == -1]
     outgoing = [(pdg, E, px, py, pz)
                 for status, pdg, E, px, py, pz in particles
-                if status == 1]
+                if (status == 1 or status ==2)]
 
     alp_rows     = [(E, px, py, pz) for pdg, E, px, py, pz in outgoing if pdg == ALP_PDG_ID]
     photon_rows  = [(E, px, py, pz) for pdg, E, px, py, pz in outgoing if pdg == PHOTON_PDG_ID]
