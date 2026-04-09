@@ -62,25 +62,24 @@ import copy
 import sys
 
 ################################################
-## Detector geometry  (ATLAS defaults)
+## Detector geometry  (Updated for CMS Run 3, April 9, 2026, based on https://cds.cern.ch/record/1129810/files/jinst8_08_s08004.pdf )
 ## ─────────────────────────────────────────────
 ## Replace these values if you use a different detector.
 ################################################
 
 # TRT barrel
-z_max_TRT        = 0.72   # m  – half-length of barrel active volume
-R_min_TRT        = 0.56   # m  – inner radius of barrel
-R_max_TRT        = 1.08   # m  – outer radius of barrel
+z_max_TRT        = 1.18   # m  – half-length of barrel active volume
+R_min_TRT        = 0.55   # m  – inner radius of barrel, needs to be decided if it's 0.2 or 0.55
+R_max_TRT        = 1.16   # m  – outer radius of barrel
 
 # TRT endcap
-z_min_TRT_endcap = 0.827  # m  – inner z-edge of endcap active volume
-z_max_TRT_endcap = 2.774  # m  – outer z-edge of endcap active volume
-R_min_TRT_endcap = 0.617  # m  – inner radius of endcap
-R_max_TRT_endcap = 1.106  # m  – outer radius of endcap
+z_min_TRT_endcap = 1.24  # m  – inner z-edge of endcap active volume
+z_max_TRT_endcap = 2.82  # m  – outer z-edge of endcap active volume
+R_min_TRT_endcap = 0.225  # m  – inner radius of endcap
+R_max_TRT_endcap = 1.135  # m  – outer radius of endcap
 
 # ECAL
-R_ECAL = 1.8  # m  – effective ECAL radius used for Delta-R correction
-              #      (midpoint of ATLAS ECAL radial range 1.4–2.25 m)
+R_ECAL = 1.29  # m  – CMS ECAL barrel inner face
 
 # Derived pseudorapidity boundaries (do not edit)
 eta_min           = 0.
@@ -90,7 +89,7 @@ eta_max_endcap    = -np.log(np.tan(0.5 * np.arctan(R_min_TRT_endcap / z_max_TRT_
 eta_corner_endcap = -np.log(np.tan(0.5 * np.arctan(R_max_TRT_endcap / z_max_TRT_endcap)))
 
 ################################################
-## Photon conversion fractions  (ATLAS, arXiv:1810.05087)
+## Photon conversion fractions  (ATLAS, arXiv:1810.05087) !STILL NEEDS TO BE UPDATED FOR CMS RUN 3!
 ## ─────────────────────────────────────────────
 ## conv_fr[0]  : upper edges of |eta| bins
 ## conv_fr[1]  : fraction of all photons reconstructed as converted
