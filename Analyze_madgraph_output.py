@@ -73,8 +73,7 @@ from module_VBF import (
 ## ma_name must match the filename stem in data/<ma_name>.csv.
 ################################################
 
-ma_list = np.logspace(-2,1, num=32)
-
+ma_list= [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1., 2., 5., 10.]
 def ma_to_name(ma):
     """Convert an ALP mass (GeV, float) to the filename stub used in data/."""
     return f"{ma:.4f}GeV".replace('.', '_')
