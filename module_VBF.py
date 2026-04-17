@@ -68,9 +68,11 @@ import sys
 ################################################
 
 # TRT barrel
-z_max_TRT        = 1.18   # m  – half-length of barrel active volume
 R_min_TRT        = 0.55   # m  – inner radius of barrel, needs to be decided if it's 0.2 or 0.55
-R_max_TRT        = 1.16   # m  – outer radius of barrel
+R_max_TRT        = 1.10   # m  – outer radius of barrel
+z_max_TRT        = 1.18   # m  – half-length of barrel active volume
+
+
 
 # TRT endcap
 z_min_TRT_endcap = 1.24  # m  – inner z-edge of endcap active volume
