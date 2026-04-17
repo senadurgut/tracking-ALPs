@@ -13,7 +13,7 @@ where <mass_index> is an integer index into ``ma_list`` (0-based).
 
 Example
 -------
-    # Analyse events for m_a = 0.1 GeV  (index 9 in ma_list)
+    # Analyse events for m_a = 0.1 GeV  (index 9 in ma_list for the default grid)
     python Analyze_madgraph_output.py 9
 
 Output
@@ -112,19 +112,20 @@ num_events = 1_000_000
 pT_cut_value = 150    # GeV
 
 # Tracker angular resolution for determining photon track directions (metres).
-TRT_track_resolution = 2.0e-4  # m = 0.2 mm
+TRT_track_resolution =3.0e-5  # m = 10 micrometers
 
 # Minimum displaced-vertex impact parameter required to tag a decay as displaced (metres).
-vertex_displacement  = 1.0e-1  # m = 10 cm
+vertex_displacement  = 1.0e-1  # m = 10 
+
 
 # Minimum track separation required to resolve the two photon tracks (metres).
-TRT_sep_resolution = 5.0e-4  # m = 0.5 mm
+TRT_sep_resolution = 4.0e-4  # m = 0.4 mm
 
 # Maximum Delta-R between the two photons for the pair to pass the ECAL isolation criterion.
 # Uncomment the desired definition:
-DeltaR_max = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
+#DeltaR_max = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
 # DeltaR_max = np.sqrt(0.075**2 + 0.123**2)  # ECAL L1 granularity (~0.14)
-
+DeltaR_max ``= np.sqrt(0.0174**2 + 0.0174**2)  # ≈ 0.0246 CMS ECAL barrel cell size
 
 
 ################################################
