@@ -13,7 +13,7 @@ where <mass_index> is an integer index into ``ma_list`` (0-based).
 
 Example
 -------
-    # Analyse events for m_a = 0.1 GeV  (index 9 in ma_list)
+    # Analyse events for m_a = 0.1 GeV  (index 9 in ma_list for the default grid)
     python Analyze_madgraph_output.py 9
 
 Output
@@ -27,27 +27,26 @@ The following files are written inside the ``results/`` directory:
   results_vbf_isolated.csv     – additionally requiring Delta-R < DeltaR_max
 
 The four results CSVs have one header row of g_agg values, then one row per
-ALP mass with the event counts for each g_agg point.  The params CSV is
-overwritten on every run — all masses in a batch should be run with the same
-cut parameters.
+ALP mass appended for each run (existing rows are not cleared).  ``params.csv``
+is written only if it does not already exist so later mass points do not
+clobber it.  Use the same cut parameters for every mass in a batch.
 
 Input data
 ----------
-Events for each ALP mass are read from::
+Events for each ALP mass are read from merged per-mass CSVs (same naming as
+``merge_cmsrun3_csvs_by_mass.sh``)::
 
-    data/<ma_name>.csv
+    <tracking-ALPs>/data/cmsrun3-csvs-merged/merged_ma_<mass>GeV.csv
 
-where <ma_name> is a string like ``'01GeV'`` for m_a = 0.1 GeV.
-See ``lhe_to_csv.py`` for generating these files from Madgraph LHE output.
+where ``<mass>`` uses the MadGraph-style token (e.g. ``0p1000`` for 0.1 GeV).
+Those files are built from per-run CSVs produced by ``lhe_to_csv.py``.
 
 Directory layout expected
 -------------------------
-    project_root/
+    tracking-ALPs/
     ├── Analyze_madgraph_output.py   (this script)
     ├── module_VBF.py
-    ├── lhe_to_csv.py
-    ├── data/                        # input CSVs from lhe_to_csv.py
-    │   └── <ma_name>.csv
+    ├── data/cmsrun3-csvs-merged/merged_ma_*GeV.csv
     └── results/                     # output CSVs (created automatically)
 """
 
@@ -66,18 +65,30 @@ from module_VBF import (
     calculate_separations_2converted_displaced_isolated,
 )
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, 'data', 'cmsrun3-csvs-merged')
+RESULTS_DIR = os.path.join(SCRIPT_DIR, 'results')
+
 ################################################
 ## ALP mass grid
 ## ─────────────────────────────────────────────
 ## Add or remove masses here to match your Madgraph runs.
-## ma_name must match the filename stem in data/<ma_name>.csv.
+## ma_name must match the stem of merged_ma_*GeV.csv under DATA_DIR.
 ################################################
 
-ma_list = np.logspace(-2,1, num=32)
+#ma_list = np.logspace(-2,1, num=32)
+ma_list = [0.01, 0.02, 0.03, 0.04, 0.05,
+        0.06, 0.07, 0.08, 0.09, 0.1,
+        0.2, 0.3, 0.4, 0.5, 0.6,
+        0.7, 0.8, 0.9, 1.0, 2.0,
+        3.0, 4.0, 5.0, 6.0, 7.0,
+        8.0, 9.0, 10.0]
+
 
 def ma_to_name(ma):
-    """Convert an ALP mass (GeV, float) to the filename stub used in data/."""
-    return f"{ma:.4f}GeV".replace('.', '_')
+    """Map m_a (GeV) to merged CSV stem: merged_ma_0p7000GeV (MG5-style)."""
+    token = f'{ma:.4f}'.replace('.', 'p')
+    return f'merged_ma_{token}GeV'
 
 # Parse the mass index from the command line
 ma_value = ma_list[round(float(sys.argv[1]))]
@@ -99,7 +110,7 @@ gagg_list = np.logspace(-7, -2, num=32)
 ## max_events: legacy variable (not used in current analysis logic).
 ################################################
 
-num_events = 1_000_000
+num_events = 100_000
 
 ################################################
 ## Cut parameters
@@ -112,33 +123,36 @@ num_events = 1_000_000
 pT_cut_value = 150    # GeV
 
 # Tracker angular resolution for determining photon track directions (metres).
-TRT_track_resolution = 2.0e-4  # m = 0.2 mm
+TRT_track_resolution =3.0e-5  # m = 10 micrometers
 
 # Minimum displaced-vertex impact parameter required to tag a decay as displaced (metres).
-vertex_displacement  = 1.0e-1  # m = 10 cm
+vertex_displacement  = 1.0e-1  # m = 10 
+
 
 # Minimum track separation required to resolve the two photon tracks (metres).
-TRT_sep_resolution = 5.0e-4  # m = 0.5 mm
+TRT_sep_resolution = 4.0e-4  # m = 0.4 mm
 
 # Maximum Delta-R between the two photons for the pair to pass the ECAL isolation criterion.
 # Uncomment the desired definition:
-DeltaR_max = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
+#DeltaR_max = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
 # DeltaR_max = np.sqrt(0.075**2 + 0.123**2)  # ECAL L1 granularity (~0.14)
-
+DeltaR_max = np.sqrt(0.0174**2 + 0.0174**2)  # ≈ 0.0246 CMS ECAL barrel cell size
 
 
 ################################################
 ## Make sure the output directory exists
 ################################################
 
-os.makedirs('results', exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 ################################################
 ## Write parameters to file
 ## ─────────────────────────────────────────────
-## A params.csv is written (overwriting any previous one) each time the
-## script runs, so the results folder always documents the settings used.
-## All masses in a batch must be run with the same parameters.
+## params.csv is created once if missing. Later mass-index runs do not
+## overwrite it (so a batch can accumulate results under one parameter record).
+## To change cuts and start fresh: remove params.csv and the results_vbf_*.csv
+## files (or use a new RESULTS_DIR).
+## All masses in a batch should use the same cut values as recorded there.
 ################################################
 
 params = {
@@ -149,16 +163,23 @@ params = {
     'vertex_displacement': vertex_displacement,
     'Delta_R':             DeltaR_max,
 }
-pd.DataFrame.from_dict(params, orient='index').to_csv(
-    'results/params.csv', header=False
-)
+params_path = os.path.join(RESULTS_DIR, 'params.csv')
+if not os.path.isfile(params_path):
+    pd.DataFrame.from_dict(params, orient='index').to_csv(params_path, header=False)
+    print(f'Wrote {params_path}')
+else:
+    print(f'Leaving existing {params_path} unchanged.')
 
 ################################################
 ## Analysis pipeline
 ################################################
 
+csv_path = os.path.join(DATA_DIR, ma_name + '.csv')
+if not os.path.isfile(csv_path):
+    raise SystemExit(f'Missing input CSV: {csv_path}')
+
 print(f'Reading data for m_a = {ma_value} GeV  ({ma_name}) ...')
-raw_events = read_data(ma_name, num=num_events, data_dir='data')
+raw_events = read_data(ma_name, num=num_events, data_dir=DATA_DIR)
 
 print('Converting to event objects ...')
 events = raw_to_events(raw_events, gaggs=gagg_list, ma=ma_value)
@@ -225,9 +246,10 @@ delta_Rs_isolated          = [delta_Rs_displaced[i][mask_DR[i]]          for i i
 ## Write results to CSV
 ################################################
 
-base = 'results/results_vbf'
+base = os.path.join(RESULTS_DIR, 'results_vbf')
 
-# Write a header row with g_agg values the first time this mass grid is used
+# Write a header row with g_agg values only when creating a new results file.
+# Subsequent runs append one row per mass (mode 'a'); they do not replace the file.
 for suffix in ('_total', '_separated', '_displaced', '_isolated'):
     path = base + suffix + '.csv'
     if not os.path.exists(path):
@@ -242,4 +264,4 @@ _write_row(base + '_separated.csv', ma_name, np.array([len(x) for x in separatio
 _write_row(base + '_displaced.csv', ma_name, np.array([len(x) for x in separations_displaced]))
 _write_row(base + '_isolated.csv',  ma_name, np.array([len(x) for x in separations_isolated]))
 
-print(f'Done. Results written to {base}_*.csv')
+print(f'Done. Results written to {base}_*.csv under {RESULTS_DIR}')
