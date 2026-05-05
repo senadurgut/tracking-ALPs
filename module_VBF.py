@@ -53,12 +53,8 @@ the script that converts Madgraph LHE output to this format.
 
 import numpy as np
 from numpy.random import uniform
-from scipy.optimize import root_scalar
-import scipy as scp
-from sympy import *
 import pandas as pd
 import os
-import copy
 import sys
 
 ################################################
@@ -156,6 +152,48 @@ def decay_length(ma, momentum, gagg):
     gamma = momentum / ma
     ctau_iGeV = 64.0 * np.pi * gamma / (gagg**2 * ma**3)
     return ctau_iGeV * 1.0e-9 * 1.973e-7  # GeV^{-1} -> m
+
+
+def decay_length_batch(ma, momentum, gaggs):
+    """Same physics as ``decay_length`` but vectorized over *gaggs* (1-D array)."""
+    gaggs = np.asarray(gaggs, dtype=np.float64)
+    gamma = momentum / ma
+    ctau_iGeV = 64.0 * np.pi * gamma / (gaggs * gaggs * ma**3)
+    return ctau_iGeV * 1.0e-9 * 1.973e-7
+
+
+def _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob, maxiter=80):
+    """
+    Solve cumulative(x) == random2 for x in (0, L_tracker), with *cumulative*
+    defined as in ``conv_prob_finite_lifetime_novec``.  Uses bisection only
+    (no SciPy) — this is the hot path for converted photons.
+    """
+    fc_over_cp = f_conv / c_prob
+    dl = d_length
+    Lt = L_tracker
+
+    def F(x):
+        return fc_over_cp * (
+            1.0 - dl / Lt * (
+                1.0 - (1.0 - (Lt - x) / dl) * np.exp(-x / dl)
+            )
+        ) - random2
+
+    a, b = 0.0, Lt
+    fa, fb = F(a), F(b)
+    if not (fa * fb < 0):
+        return None
+
+    for _ in range(maxiter):
+        m = 0.5 * (a + b)
+        fm = F(m)
+        if abs(fm) <= 1e-14 * max(1.0, abs(random2)):
+            return m
+        if fa * fm < 0:
+            b, fb = m, fm
+        else:
+            a, fa = m, fm
+    return 0.5 * (a + b)
 
 ################################################
 ## Photon conversion probability
@@ -291,39 +329,106 @@ def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
     track_length : float
         If converted, the track length inside the TRT in metres; else 0.
     """
-    d_length   = decay_length(ma, pa, gagg)
-    f_conv_true = conv_prob(eta, kind=kind)
-    # Also account for reconstruction efficiency
-    f_conv      = f_conv_true * np.sqrt(conv_prob(eta, kind='reco'))
-    L_tracker   = TRT_length(eta)
+    d_length = decay_length(ma, pa, gagg)
+    f_conv_true = conv_prob_novec(eta, kind=kind)
+    f_conv = f_conv_true * np.sqrt(conv_prob_novec(eta, kind='reco'))
+    L_tracker = TRT_length_novec(eta)
 
     if L_tracker == 0.:
-        c_prob = 0.
+        c_prob = 0.0
     else:
-        c_prob = f_conv * (1.0 - (1.0 - np.exp(-L_tracker / d_length)) * d_length / L_tracker)
+        c_prob = f_conv * (
+            1.0 - (1.0 - np.exp(-L_tracker / d_length)) * d_length / L_tracker
+        )
 
     random = uniform()
-    conv   = random < c_prob
+    conv = random < c_prob
 
     if conv:
         random2 = uniform()
-        cumulative = lambda x: (
-            f_conv / c_prob
-            * (1.0 - d_length / L_tracker * (
-                1.0 - (1.0 - (L_tracker - x) / d_length) * np.exp(-x / d_length)
-            ))
+        c0 = f_conv / c_prob * (
+            1.0 - d_length / L_tracker * (
+                1.0 - (1.0 - L_tracker / d_length) * 1.0
+            )
         )
-        bracket_ok = (cumulative(0) - random2) * (cumulative(L_tracker) - random2) < 0
+        cL = f_conv / c_prob * (
+            1.0 - d_length / L_tracker * (
+                1.0 - (1.0 - 0.0 / d_length) * np.exp(-L_tracker / d_length)
+            )
+        )
+        bracket_ok = (c0 - random2) * (cL - random2) < 0
         if bracket_ok:
-            result = root_scalar(lambda x: cumulative(x) - random2,
-                                 bracket=[0, L_tracker], method='brentq')
-            track_length = L_tracker - result.root
+            root = _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob)
+            if root is not None:
+                track_length = L_tracker - root
+            else:
+                track_length = 0.0
         else:
-            track_length = 0.
+            track_length = 0.0
     else:
-        track_length = 0.
+        track_length = 0.0
 
     return c_prob, conv, track_length
+
+
+def conv_prob_finite_lifetime_batch(eta, ma, pa, gaggs, kind='true'):
+    """
+    Same Monte Carlo as ``conv_prob_finite_lifetime_novec`` for each coupling,
+    with identical RNG consumption order as a scalar loop over *gaggs*
+    (two ``uniform()`` calls per coupling when the photon converts).
+    Returns ``p_conv``, ``conv``, ``l_track`` with shape ``(len(gaggs),)``.
+    """
+    gaggs = np.asarray(gaggs, dtype=np.float64)
+    n = gaggs.shape[0]
+    p_out = np.empty(n, dtype=np.float64)
+    c_out = np.empty(n, dtype=bool)
+    l_out = np.empty(n, dtype=np.float64)
+
+    f_conv_true = conv_prob_novec(eta, kind=kind)
+    f_reco = conv_prob_novec(eta, kind='reco')
+    f_conv = f_conv_true * np.sqrt(f_reco)
+    L_tracker = TRT_length_novec(eta)
+
+    if L_tracker == 0.0:
+        p_out.fill(0.0)
+        c_out.fill(False)
+        l_out.fill(0.0)
+        return p_out, c_out, l_out
+
+    d_lengths = decay_length_batch(ma, pa, gaggs)
+    exp_term = np.exp(-L_tracker / d_lengths)
+    p_out[:] = f_conv * (
+        1.0 - (1.0 - exp_term) * d_lengths / L_tracker
+    )
+
+    for i in range(n):
+        d_length = d_lengths[i]
+        c_prob = p_out[i]
+        random = uniform()
+        conv = random < c_prob
+        c_out[i] = conv
+        if not conv:
+            l_out[i] = 0.0
+            continue
+        random2 = uniform()
+        c0 = f_conv / c_prob * (
+            1.0 - d_length / L_tracker * (
+                1.0 - (1.0 - L_tracker / d_length) * 1.0
+            )
+        )
+        cL = f_conv / c_prob * (
+            1.0 - d_length / L_tracker * (
+                1.0 - (1.0 - 0.0 / d_length) * np.exp(-L_tracker / d_length)
+            )
+        )
+        if (c0 - random2) * (cL - random2) < 0:
+            root = _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob)
+            l_out[i] = (L_tracker - root) if root is not None else 0.0
+        else:
+            l_out[i] = 0.0
+
+    return p_out, c_out, l_out
+
 
 conv_prob_finite_lifetime = np.vectorize(conv_prob_finite_lifetime_novec)
 
@@ -462,16 +567,25 @@ def read_data(run_name, num=10000, data_dir='data'):
         ``'g2'``, each holding a NumPy array ``[E, px, py, pz]``.
     """
     filepath = os.path.join(data_dir, run_name + '.csv')
-    temp     = pd.read_csv(filepath, sep=';', header=None, nrows=ROWS_PER_EVENT * num)
-    length   = min(len(temp) // ROWS_PER_EVENT, num)
+    temp = pd.read_csv(filepath, sep=';', header=None, nrows=ROWS_PER_EVENT * num)
+    length = min(len(temp) // ROWS_PER_EVENT, num)
+    if length == 0:
+        return []
 
-    raw_events = [dict(_raw_event_template) for _ in range(length)]
+    nrows = length * ROWS_PER_EVENT
+    coords = (
+        temp.iloc[:nrows, 0]
+        .str.split(',', expand=True)
+        .to_numpy(dtype=np.float64)
+        .reshape(length, ROWS_PER_EVENT, 4)
+    )
+    raw_events = []
     for i in range(length):
-        rows = [np.fromstring(temp.values[ROWS_PER_EVENT * i + j, 0], sep=',')
-                for j in range(ROWS_PER_EVENT)]
-        raw_events[i]["a"]  = rows[ROW_ALP]
-        raw_events[i]["g1"] = rows[ROW_G1]
-        raw_events[i]["g2"] = rows[ROW_G2]
+        raw_events.append({
+            'a': coords[i, ROW_ALP],
+            'g1': coords[i, ROW_G1],
+            'g2': coords[i, ROW_G2],
+        })
     return raw_events
 
 
@@ -501,30 +615,30 @@ def raw_to_events(raw_events, gaggs, ma):
         Each element has keys 'a', 'g1', 'g2'.  Each particle sub-dict
         contains arrays indexed by event and/or g_{agg} grid point.
     """
+    gaggs_arr = np.asarray(gaggs, dtype=np.float64)
     events = []
     for raw in raw_events:
-        ev = copy.deepcopy(_event_template)
+        ev = {'a': {}, 'g1': {}, 'g2': {}}
         for ptcl in ('a', 'g1', 'g2'):
-            mom  = raw[ptcl]
-            p    = np.sqrt(mom[1]**2 + mom[2]**2 + mom[3]**2)
-            pt   = np.sqrt(mom[1]**2 + mom[2]**2)
-            eta  = np.arctanh(mom[3] / p)
-            phi  = np.arctan2(mom[2], mom[1])
+            mom = raw[ptcl]
+            p = np.sqrt(mom[1]**2 + mom[2]**2 + mom[3]**2)
+            pt = np.sqrt(mom[1]**2 + mom[2]**2)
+            eta = np.arctanh(mom[3] / p)
+            phi = np.arctan2(mom[2], mom[1])
             ev[ptcl]['eta'] = eta
             ev[ptcl]['phi'] = phi
-            ev[ptcl]['pt']  = pt
-            ev[ptcl]['p']   = p
-            ev[ptcl]['E']   = mom[0]
+            ev[ptcl]['pt'] = pt
+            ev[ptcl]['p'] = p
+            ev[ptcl]['E'] = mom[0]
             if ptcl == 'a':
-                ev[ptcl]['l'] = np.array([decay_length(ma, p, g) for g in gaggs])
+                ev[ptcl]['l'] = decay_length_batch(ma, p, gaggs_arr)
             else:
-                result = np.array([
-                    conv_prob_finite_lifetime(eta, ma, ev['a']['p'], g)
-                    for g in gaggs
-                ])
-                ev[ptcl]['p_conv'],  \
-                ev[ptcl]['conv'],    \
-                ev[ptcl]['l_track'] = result.T
+                pc, cv, lt = conv_prob_finite_lifetime_batch(
+                    eta, ma, ev['a']['p'], gaggs_arr, kind='true'
+                )
+                ev[ptcl]['p_conv'] = pc
+                ev[ptcl]['conv'] = cv
+                ev[ptcl]['l_track'] = lt
         events.append(ev)
     return events
 
