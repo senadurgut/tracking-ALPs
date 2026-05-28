@@ -58,7 +58,7 @@ from xml.etree import ElementTree as ET
 
 
 # ── Change this if your UFO model uses a different PDG code for the ALP ──
-ALP_PDG_ID = 36#9000005
+ALP_PDG_ID = 36 #9000005 PDG ID for ALP in Madgraph
 PHOTON_PDG_ID = 22
 
 

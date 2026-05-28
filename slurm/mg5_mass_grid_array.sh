@@ -3,10 +3,10 @@
 #SBATCH --partition=work
 #SBATCH --ntasks=1
 #SBATCH --qos=cpu
-#SBATCH --time=12:00:00
-#SBATCH --array=0-5
-#SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --error=logs/%x_%A_%a.err
+#SBATCH --time=48:00:00
+#SBATCH --array=0-8
+#SBATCH --output=logs/event_generation/mg5_%x_%A_%a.out
+#SBATCH --error=logs/event_generation/mg5_%x_%A_%a.err
 
 set -euo pipefail
 
@@ -16,11 +16,29 @@ TEMPLATE_PROCESS="trial_01_gev"
 # Total events per mass point = N_RUNS * NEVENTS_PER_RUN (kept <=1e6 per MG5 warning)
 # Default "smoke test": 10k events per mass point (1 run).
 NEVENTS_PER_RUN="${NEVENTS_PER_RUN:-10000}"
-N_RUNS="${N_RUNS:-1}"
+N_RUNS="${N_RUNS:-10}"
+
+# Append extra runs into an existing CMSRun3_vbf_ax_ma_* directory (do NOT wipe Events/).
+# Use when you already have run_* folders and only need more generate_events batches.
+# Skips rm/cp from template. Combine step is off by default so Events/grid_* is not
+# rebuilt from only the new runs (report_lhe_event_counts.py sums all run_* anyway).
+REUSE_EXISTING_PROC_DIR="${REUSE_EXISTING_PROC_DIR:-0}"
+if [[ "$REUSE_EXISTING_PROC_DIR" == "1" ]]; then
+  # Default on: combine would only merge this job's runs and drop older run_* from grid_*.
+  SKIP_GRID_COMBINE="${SKIP_GRID_COMBINE:-1}"
+else
+  SKIP_GRID_COMBINE="${SKIP_GRID_COMBINE:-0}"
+fi
 
 # Option A (default): hardcode the missing masses here
-MASS_POINTS=(
-  3.0 4.0 6.0 7.0 8.0 9.0
+
+
+#MASS_POINTS=(
+  #0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08 0.09 0.1
+  #0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 2.0 5.0 10.0
+#)
+MASS_POINTS=( 
+  20 30 40 50 60 70 80 90 100
 )
 
 # Option B: provide a file with one mass per line, and export MASS_POINTS_FILE=/path/to/masses.txt
@@ -194,34 +212,45 @@ echo "MG5_DIR=${MG5_DIR}"
 echo "template=${TEMPLATE_PROCESS}"
 echo "events per mass: $((N_RUNS * NEVENTS_PER_RUN)) (as ${N_RUNS} x ${NEVENTS_PER_RUN})"
 
-# Create a clean per-mass process dir (A2: always delete + re-copy).
-# This avoids mixed compiler artifacts (e.g. gfortran .mod version mismatches) on clusters.
-if [[ -d "$proc_dir" ]]; then
-  echo "Removing existing $proc_dir for a clean rebuild"
-  rm -rf "$proc_dir"
-fi
-echo "Creating $proc_dir from template"
-cp -R "${MG5_DIR}/${TEMPLATE_PROCESS}" "$proc_dir"
+if [[ "$REUSE_EXISTING_PROC_DIR" == "1" ]]; then
+  if [[ ! -d "$proc_dir" ]]; then
+    echo "ERROR: REUSE_EXISTING_PROC_DIR=1 but missing: $proc_dir" >&2
+    exit 2
+  fi
+  if [[ ! -x "$proc_dir/bin/generate_events" ]]; then
+    echo "ERROR: reuse requested but no executable: $proc_dir/bin/generate_events" >&2
+    exit 2
+  fi
+  echo "Reusing existing process dir (no delete/copy): $proc_dir"
+else
+  # Create a clean per-mass process dir (A2: always delete + re-copy).
+  # This avoids mixed compiler artifacts (e.g. gfortran .mod version mismatches) on clusters.
+  if [[ -d "$proc_dir" ]]; then
+    echo "Removing existing $proc_dir for a clean rebuild"
+    rm -rf "$proc_dir"
+  fi
+  echo "Creating $proc_dir from template"
+  cp -R "${MG5_DIR}/${TEMPLATE_PROCESS}" "$proc_dir"
 
-# If the template was copied from another machine, it may contain precompiled
-# Fortran artifacts (*.mod/*.o/*.a) built with a different gfortran. Those cause:
-#   "Cannot read module file ... created by a different version of GNU Fortran".
-# Scrub them so each Slurm task recompiles cleanly on the compute node.
-shopt -s globstar nullglob
-rm -f \
-  "$proc_dir"/**/*.mod \
-  "$proc_dir"/**/*.o \
-  "$proc_dir"/**/*.a \
-  "$proc_dir"/**/*.so \
-  "$proc_dir"/**/*.dylib \
-  "$proc_dir"/**/*.exe \
-  "$proc_dir"/**/*.pyc
-shopt -u globstar nullglob
+  # If the template was copied from another machine, it may contain precompiled
+  # Fortran artifacts (*.mod/*.o/*.a) built with a different gfortran. Those cause:
+  #   "Cannot read module file ... created by a different version of GNU Fortran".
+  # Scrub them so each Slurm task recompiles cleanly on the compute node.
+  shopt -s globstar nullglob
+  rm -f \
+    "$proc_dir"/**/*.mod \
+    "$proc_dir"/**/*.o \
+    "$proc_dir"/**/*.a \
+    "$proc_dir"/**/*.so \
+    "$proc_dir"/**/*.dylib \
+    "$proc_dir"/**/*.exe \
+    "$proc_dir"/**/*.pyc
+  shopt -u globstar nullglob
 
-# Cluster builds typically have libstdc++ but not libc++.
-# Ensure the copied template doesn't try to link against -lc++.
-if [[ -f "$proc_dir/Source/make_opts" ]]; then
-  python3 - "$proc_dir/Source/make_opts" <<'PY'
+  # Cluster builds typically have libstdc++ but not libc++.
+  # Ensure the copied template doesn't try to link against -lc++.
+  if [[ -f "$proc_dir/Source/make_opts" ]]; then
+    python3 - "$proc_dir/Source/make_opts" <<'PY'
 from pathlib import Path
 
 p = Path(__file__).parent  # unused, keep for robustness
@@ -235,6 +264,7 @@ txt2 = txt2.replace("STDLIB_FLAG=-stdlib=libc++", "STDLIB_FLAG=")
 if txt2 != txt:
     path.write_text(txt2)
 PY
+  fi
 fi
 
 patch_cards "$proc_dir" "$ma" "$NEVENTS_PER_RUN"
@@ -259,9 +289,13 @@ for ((k=1; k<=N_RUNS; k++)); do
   run_dirs+=("$last_run_dir")
 done
 
-out_dir="Events/${run_name}"
-mkdir -p "$out_dir"
-echo "Combining -> ${out_dir}/unweighted_events.lhe.gz"
-combine_lhe_runs "${out_dir}/unweighted_events.lhe.gz" "${run_dirs[@]}"
-
-echo "DONE mass=${ma} output=${proc_dir}/${out_dir}/unweighted_events.lhe.gz"
+if [[ "$SKIP_GRID_COMBINE" == "1" ]]; then
+  echo "SKIP_GRID_COMBINE=1: leaving per-run LHE under Events/run_* only"
+else
+  out_dir="Events/${run_name}"
+  mkdir -p "$out_dir"
+  echo "Combining -> ${out_dir}/unweighted_events.lhe.gz"
+  combine_lhe_runs "${out_dir}/unweighted_events.lhe.gz" "${run_dirs[@]}"
+  echo "DONE mass=${ma} merged=${proc_dir}/${out_dir}/unweighted_events.lhe.gz"
+fi
+echo "DONE mass=${ma} proc_dir=${proc_dir} new_runs=${#run_dirs[@]}"

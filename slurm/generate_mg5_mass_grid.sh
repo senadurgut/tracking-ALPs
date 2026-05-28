@@ -13,13 +13,13 @@ set -euo pipefail
 # Notes:
 # - This script edits:
 #     Cards/param_card.dat : BLOCK MASS entry 36 (ax) -> m_a
-#     Cards/run_card.dat   : nevents -> 100000  (then uses multi_run to reach 1e6 total)
+#     Cards/run_card.dat   : nevents -> 10000  (then uses multi_run to reach 1e6 total)
 # - Running 1e6 unweighted events per mass point can take a long time.
 
-MG5_DIR="/Users/sena/grad_school/Research/ALP/tools/MG5_aMC_v3_5_13"
+MG5_DIR="/home/export/sdurgut/scratch/alps/tools/MG5_aMC_v3_5_13"
 TEMPLATE_PROCESS="trial_01_gev"
 TOTAL_NEVENTS="1000000"
-NEVENTS_PER_RUN="100000"
+NEVENTS_PER_RUN="10000"
 N_RUNS="10"
 
 MASS_POINTS=(
