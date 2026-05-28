@@ -15,10 +15,18 @@ set -euo pipefail
 # Env overrides:
 #   IN_DIR  : directory containing per-run CSVs
 #   OUT_DIR : directory to write merged CSVs
+#   MAX_EVENTS_PER_MASS : if set (e.g. 100000), merge at most this many events worth
+#                         of run CSVs **per mass**, assuming EVENTS_PER_RUN_ASSUMED
+#                         events per input file (integer division: merged_run_files =
+#                         MAX_EVENTS_PER_MASS / EVENTS_PER_RUN_ASSUMED). Run files are
+#                         still ordered by run index as today; extra files for that mass
+#                         are skipped.
+#   EVENTS_PER_RUN_ASSUMED : events per per-run CSV (default 10000). Used only with
+#                            MAX_EVENTS_PER_MASS.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IN_DIR="${IN_DIR:-${SCRIPT_DIR}/data/cmsrun3-csvs}"
-OUT_DIR="${OUT_DIR:-${SCRIPT_DIR}/data/cmsrun3-csvs-merged}"
+IN_DIR="/home/export/sdurgut/scratch/alps/tracking-ALPs/data/cmsrun3-csvs"
+OUT_DIR="/home/export/sdurgut/scratch/alps/tracking-ALPs/data/cmsrun3-csvs-merged"
 
 if [[ ! -d "${IN_DIR}" ]]; then
   echo "ERROR: input directory not found: ${IN_DIR}" >&2
@@ -26,6 +34,26 @@ if [[ ! -d "${IN_DIR}" ]]; then
 fi
 
 mkdir -p "${OUT_DIR}"
+
+max_merge_files=""
+if [[ -n "${MAX_EVENTS_PER_MASS:-}" ]]; then
+  if ! [[ "${MAX_EVENTS_PER_MASS}" =~ ^[0-9]+$ ]] || [[ "${MAX_EVENTS_PER_MASS}" -le 0 ]]; then
+    echo "ERROR: MAX_EVENTS_PER_MASS must be a positive integer, got: ${MAX_EVENTS_PER_MASS}" >&2
+    exit 2
+  fi
+  EVENTS_PER_RUN_ASSUMED="${EVENTS_PER_RUN_ASSUMED:-10000}"
+  if ! [[ "${EVENTS_PER_RUN_ASSUMED}" =~ ^[0-9]+$ ]] || [[ "${EVENTS_PER_RUN_ASSUMED}" -le 0 ]]; then
+    echo "ERROR: EVENTS_PER_RUN_ASSUMED must be a positive integer, got: ${EVENTS_PER_RUN_ASSUMED}" >&2
+    exit 2
+  fi
+  max_merge_files=$((MAX_EVENTS_PER_MASS / EVENTS_PER_RUN_ASSUMED))
+  if [[ "${max_merge_files}" -lt 1 ]]; then
+    echo "ERROR: MAX_EVENTS_PER_MASS (${MAX_EVENTS_PER_MASS}) < EVENTS_PER_RUN_ASSUMED (${EVENTS_PER_RUN_ASSUMED}) yields zero files per mass." >&2
+    exit 2
+  fi
+  echo "Cap: merge at most ${max_merge_files} run CSV(s) per mass (~$((max_merge_files * EVENTS_PER_RUN_ASSUMED)) events if ${EVENTS_PER_RUN_ASSUMED} events/run)."
+  echo
+fi
 
 tmp_list="$(mktemp)"
 trap 'rm -f "${tmp_list}"' EXIT
@@ -83,6 +111,7 @@ n_out=0
 n_in_total=0
 mass_idx=0
 idx_in_mass=0
+merged_this_mass=0
 files_this_mass=0
 
 while IFS=$'\t' read -r mass run file; do
@@ -95,13 +124,25 @@ while IFS=$'\t' read -r mass run file; do
     n_out=$((n_out + 1))
     mass_idx=$((mass_idx + 1))
     idx_in_mass=0
+    merged_this_mass=0
     files_this_mass="$(awk -F'\t' -v m="${mass}" '$1 == m { c++ } END { print c + 0 }' "${tmp_list}")"
-    echo "==> [mass ${mass_idx}/${n_masses}] ma_${mass} GeV  (${files_this_mass} run file(s)) -> ${out_file}"
+    if [[ -n "${max_merge_files}" ]]; then
+      echo "==> [mass ${mass_idx}/${n_masses}] ma_${mass} GeV  (${files_this_mass} run file(s); merging first ${max_merge_files}) -> ${out_file}"
+    else
+      echo "==> [mass ${mass_idx}/${n_masses}] ma_${mass} GeV  (${files_this_mass} run file(s)) -> ${out_file}"
+    fi
   fi
 
   idx_in_mass=$((idx_in_mass + 1))
+
+  if [[ -n "${max_merge_files}" ]] && [[ "${merged_this_mass}" -ge "${max_merge_files}" ]]; then
+    echo "    [${n_in_total}/${n_files}] skip run_${run} $(basename "${file}")  (per-mass run limit reached)"
+    continue
+  fi
+
+  merged_this_mass=$((merged_this_mass + 1))
   n_in_total=$((n_in_total + 1))
-  echo "    [${n_in_total}/${n_files}] [run ${idx_in_mass}/${files_this_mass}] run_${run}  $(basename "${file}")"
+  echo "    [${n_in_total}/${n_files}] [run ${merged_this_mass}/${files_this_mass}] run_${run}  $(basename "${file}")"
 
   # Append without altering structure.
   cat "${file}" >> "${out_file}"
