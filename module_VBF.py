@@ -6,25 +6,29 @@ vector-boson fusion (VBF) at the LHC, with the ALP subsequently decaying to two
 photons inside the tracking detector.
 
 The module implements:
-  - Data I/O: reading pre-processed Madgraph event CSVs.
+  - Data I/O: reading pre-processed Madgraph event CSVs (jets + ALP + photons).
   - Kinematics: 4-momentum parsing, decay-length calculation.
-  - Detector simulation (ATLAS geometry by default):
+  - Detector simulation (CMS Run 3 geometry):
       * Photon conversion probability as a function of eta, including finite
-        ALP decay-length corrections (from ATLAS paper arXiv:1810.05087).
-      * TRT tracker length as a function of eta.
-      * Transverse separation of the two conversion tracks at the outer TRT wall.
+        ALP decay-length corrections.
+      * TRT-equivalent tracker path length as a function of eta.
+      * Transverse separation of the two conversion tracks at the outer
+        tracker wall.
       * Impact-parameter (displaced-vertex) significance.
-      * Delta-R / Delta-eta between the two photons at the ECAL.
-  - Batch processing: ``calculate_separations_2converted_displaced_isolated``
-    sweeps over a grid of ALP–photon couplings g_agg.
+      * Delta-R between the two photons at the ECAL.
 
 Detector geometry
 -----------------
-All geometry constants at the top of this file correspond to the **ATLAS**
-inner detector (TRT barrel + endcap) and ECAL.  If you are analysing a
-different experiment, replace the values in the "Detector geometry" section
-with your detector's parameters and supply your own photon-conversion
-probability table (``conv_fr`` / ``std_conv_fr``).
+Geometry constants in the "Detector geometry" section correspond to the
+**CMS Run 3** silicon tracker barrel + endcap and ECAL inner face.  If you
+are analysing a different experiment, replace those values and update the
+photon-conversion table (``conv_fr`` / ``std_conv_fr``).
+
+Photon conversion table
+-----------------------
+``conv_fr`` is a 2-row array: row 0 is the upper edges of |η| bins and row 1
+is the true conversion fraction in that bin.  Only the 'true' kind is
+supported (the ATLAS-paper-style fake/reco unfolding is not used).
 
 Input data format
 -----------------
@@ -32,15 +36,13 @@ Each event is stored as 7 consecutive rows in a semicolon-delimited CSV file.
 Each row contains the four-momentum [E, px, py, pz] of one particle,
 comma-separated:
 
-  Row 0: incoming quark 1
-  Row 1: incoming quark 2
-  Row 2: VBF jet 1
-  Row 3: VBF jet 2
-  Row 4: ALP  (a)
-  Row 5: photon 1 (g1) from a -> gg
-  Row 6: photon 2 (g2) from a -> gg
-
-Only rows 4–6 are read by ``read_data``; rows 0–3 are skipped.
+  Row 0: incoming quark 1   (skipped)
+  Row 1: incoming quark 2   (skipped)
+  Row 2: VBF jet 1          → stored as 'j1'
+  Row 3: VBF jet 2          → stored as 'j2'
+  Row 4: ALP  (a)           → stored as 'a'
+  Row 5: photon 1 (g1)      → stored as 'g1'
+  Row 6: photon 2 (g2)      → stored as 'g2'
 
 CSV files must be placed in ``data/<run_name>.csv`` relative to the working
 directory (or pass a full path to ``read_data``).  See ``lhe_to_csv.py`` for
@@ -55,7 +57,6 @@ import numpy as np
 from numpy.random import uniform
 import pandas as pd
 import os
-import sys
 
 ################################################
 ## Detector geometry  (Updated for CMS Run 3, April 9, 2026, based on https://cds.cern.ch/record/1129810/files/jinst8_08_s08004.pdf )
@@ -63,21 +64,40 @@ import sys
 ## Replace these values if you use a different detector.
 ################################################
 
-# TRT barrel
-R_min_TRT        = 0.55   # m  – inner radius of barrel, needs to be decided if it's 0.2 or 0.55
-R_max_TRT        = 1.10   # m  – outer radius of barrel
-z_max_TRT        = 1.18   # m  – half-length of barrel active volume
+# Tracker barrel
+#R_min_TRT        = 0.55   # m  – inner radius of barrel  (not used in current calculations)
+#R_max_TRT        = 1.10   # m  – outer radius of barrel
+#z_max_TRT        = 1.18   # m  – half-length of barrel active volume
+#
+#
+#
+## TRT endcap
+#z_min_TRT_endcap = 1.24  # m  – inner z-edge of endcap active volume
+#z_max_TRT_endcap = 2.82  # m  – outer z-edge of endcap active volume
+#R_min_TRT_endcap = 0.225  # m  – inner radius of endcap
+#R_max_TRT_endcap = 1.135  # m  – outer radius of endcap
+#
+## ECAL
+#R_ECAL = 1.29  # m  – CMS ECAL barrel inner face
 
 
+## Detector geometry — CMS Phase-2 (HL-LHC)
+## Source: CMS Phase-2 Tracker TDR, CERN-LHCC-2017-009
+## ─────────────────────────────────────────────
 
-# TRT endcap
-z_min_TRT_endcap = 1.24  # m  – inner z-edge of endcap active volume
-z_max_TRT_endcap = 2.82  # m  – outer z-edge of endcap active volume
-R_min_TRT_endcap = 0.225  # m  – inner radius of endcap
-R_max_TRT_endcap = 1.135  # m  – outer radius of endcap
+# Outer Tracker barrel  (≡ "TRT barrel" role)
+R_min_TRT        = 0.230   # m  – inner radius of OT barrel (T5 layer, ~23 cm)
+R_max_TRT        = 1.100   # m  – outer radius of OT barrel (T6 layer, ~110 cm)
+z_max_TRT        = 1.200   # m  – half-length of OT barrel active volume
 
-# ECAL
-R_ECAL = 1.29  # m  – CMS ECAL barrel inner face
+# Outer Tracker endcap  (≡ "TRT endcap" role)
+z_min_TRT_endcap = 1.30    # m  – inner z-edge of OT endcap active volume
+z_max_TRT_endcap = 2.80    # m  – outer z-edge of OT endcap active volume
+R_min_TRT_endcap = 0.200   # m  – inner radius of OT endcap
+R_max_TRT_endcap = 1.100   # m  – outer radius of OT endcap
+
+# ECAL (unchanged in Phase-2)
+R_ECAL = 1.29              # m  – CMS ECAL barrel inner face
 
 # Derived pseudorapidity boundaries (do not edit)
 eta_min           = 0.
@@ -87,38 +107,24 @@ eta_max_endcap    = -np.log(np.tan(0.5 * np.arctan(R_min_TRT_endcap / z_max_TRT_
 eta_corner_endcap = -np.log(np.tan(0.5 * np.arctan(R_max_TRT_endcap / z_max_TRT_endcap)))
 
 ################################################
-## Photon conversion fractions  (ATLAS, arXiv:1810.05087) !STILL NEEDS TO BE UPDATED FOR CMS RUN 3!
+## Photon conversion fractions  (CMS Run 3, placeholder values)
 ## ─────────────────────────────────────────────
 ## conv_fr[0]  : upper edges of |eta| bins
-## conv_fr[1]  : fraction of all photons reconstructed as converted
-## conv_fr[2]  : fraction of true *unconverted* photons reco'd as converted (fake rate)
-## conv_fr[3]  : fraction of true *converted*  photons reco'd as converted  (efficiency)
+## conv_fr[1]  : true converted fraction in that |eta| bin
 ##
-## If you use a different detector, replace these arrays with your own
+## NOTE: the 0.4 entries are a flat placeholder pending real CMS Run 3
 ## measurements.  The last column (eta -> inf) is a dummy "no-acceptance" bin.
 ################################################
 
 conv_fr = np.array([
     [0.6,  1.37, 1.52, 1.81, 2.37, np.inf],   # |eta| upper bin edges
-    [0.215, 0.309, 0.,  0.438, 0.536, 0.],     # total converted fraction
-    [0.053, 0.036, 0.,  0.001, 0.003, 0.],     # fake-conversion rate
-    [0.731, 0.708, 1.,  0.812, 0.544, 1.],     # true-conversion efficiency
+    [0.4,  0.4,  0.4,  0.4,  0.4,  0.0],      # true converted fraction (placeholder)
 ])
 
 std_conv_fr = np.array([
-    [0.6,   1.37,  1.52, 1.81,  2.37,  np.inf],
-    [0.014, 0.021, 0.,   0.031, 0.014, 0.],
-    [0.007, 0.007, 0.,   0.009, 0.006, 0.],
-    [0.040, 0.043, 0.,   0.052, 0.014, 0.],
+    [0.6,  1.37, 1.52, 1.81, 2.37, np.inf],
+    [0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
 ])
-
-################################################
-## Helper: file existence check
-################################################
-
-def is_non_zero_file(fpath):
-    """Return True if *fpath* exists and is non-empty."""
-    return os.path.isfile(fpath) and os.path.getsize(fpath) > 0
 
 ################################################
 ## Physics: decay length
@@ -199,39 +205,23 @@ def _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob, maxi
 ## Photon conversion probability
 ################################################
 
-def conv_prob_novec(eta, kind='true'):
+def conv_prob_novec(eta):
     """
-    Return the photon conversion probability for a single pseudorapidity value.
+    Return the true photon conversion probability for a single pseudorapidity
+    value, looked up from the ``conv_fr`` table.
 
     Parameters
     ----------
     eta : float
         Photon pseudorapidity.
-    kind : {'true', 'total', 'fake', 'reco'}
-        Which fraction to return:
-        - 'true'  : probability that a photon truly converts in the tracker.
-        - 'total' : fraction of all photons reconstructed as converted.
-        - 'fake'  : fraction of unconverted photons misidentified as converted.
-        - 'reco'  : reconstruction efficiency for genuinely converted photons.
 
     Returns
     -------
     float
+        True converted fraction in the |η| bin containing *eta*.
     """
     i = np.searchsorted(conv_fr[0], abs(eta))
-    if kind == 'true':
-        return (conv_fr[1, i] - conv_fr[2, i]) / (conv_fr[3, i] - conv_fr[2, i])
-    elif kind == 'total':
-        return conv_fr[1, i]
-    elif kind == 'fake':
-        return conv_fr[2, i]
-    elif kind == 'reco':
-        return conv_fr[3, i]
-    else:
-        print('conv_prob_novec: unknown kind "{}"'.format(kind))
-        return 0.
-
-conv_prob = np.vectorize(conv_prob_novec)
+    return conv_fr[1, i]
 
 
 def std_conv_prob_novec(eta, kind='true'):
@@ -298,7 +288,7 @@ TRT_length = np.vectorize(TRT_length_novec)
 ## Conversion probability corrected for finite ALP lifetime
 ################################################
 
-def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
+def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg):
     """
     Compute the photon conversion probability for a photon coming from an ALP
     that decays at a displaced vertex, and sample the conversion point.
@@ -317,8 +307,6 @@ def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
         ALP 3-momentum in GeV.
     gagg : float
         ALP–photon coupling in GeV^{-1}.
-    kind : str
-        Passed to ``conv_prob``; usually 'true'.
 
     Returns
     -------
@@ -327,18 +315,17 @@ def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
     conv : bool
         Whether the photon converts (Monte Carlo decision).
     track_length : float
-        If converted, the track length inside the TRT in metres; else 0.
+        If converted, the track length inside the tracker in metres; else 0.
     """
-    d_length = decay_length(ma, pa, gagg)
-    f_conv_true = conv_prob_novec(eta, kind=kind)
-    f_conv = f_conv_true * np.sqrt(conv_prob_novec(eta, kind='reco'))
+    alp_decay_length = decay_length(ma, pa, gagg)
+    f_conv = conv_prob_novec(eta)
     L_tracker = TRT_length_novec(eta)
 
     if L_tracker == 0.:
         c_prob = 0.0
     else:
         c_prob = f_conv * (
-            1.0 - (1.0 - np.exp(-L_tracker / d_length)) * d_length / L_tracker
+            1.0 - (1.0 - np.exp(-L_tracker / alp_decay_length)) * alp_decay_length / L_tracker
         )
 
     random = uniform()
@@ -347,18 +334,18 @@ def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
     if conv:
         random2 = uniform()
         c0 = f_conv / c_prob * (
-            1.0 - d_length / L_tracker * (
-                1.0 - (1.0 - L_tracker / d_length) * 1.0
+            1.0 - alp_decay_length / L_tracker * (
+                1.0 - (1.0 - L_tracker / alp_decay_length) * 1.0
             )
         )
         cL = f_conv / c_prob * (
-            1.0 - d_length / L_tracker * (
-                1.0 - (1.0 - 0.0 / d_length) * np.exp(-L_tracker / d_length)
+            1.0 - alp_decay_length / L_tracker * (
+                1.0 - (1.0 - 0.0 / alp_decay_length) * np.exp(-L_tracker / alp_decay_length)
             )
         )
         bracket_ok = (c0 - random2) * (cL - random2) < 0
         if bracket_ok:
-            root = _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob)
+            root = _invert_cumulative_bisect(random2, alp_decay_length, L_tracker, f_conv, c_prob)
             if root is not None:
                 track_length = L_tracker - root
             else:
@@ -371,7 +358,7 @@ def conv_prob_finite_lifetime_novec(eta, ma, pa, gagg, kind='true'):
     return c_prob, conv, track_length
 
 
-def conv_prob_finite_lifetime_batch(eta, ma, pa, gaggs, kind='true'):
+def conv_prob_finite_lifetime_batch(eta, ma, pa, gaggs):
     """
     Same Monte Carlo as ``conv_prob_finite_lifetime_novec`` for each coupling,
     with identical RNG consumption order as a scalar loop over *gaggs*
@@ -384,9 +371,7 @@ def conv_prob_finite_lifetime_batch(eta, ma, pa, gaggs, kind='true'):
     c_out = np.empty(n, dtype=bool)
     l_out = np.empty(n, dtype=np.float64)
 
-    f_conv_true = conv_prob_novec(eta, kind=kind)
-    f_reco = conv_prob_novec(eta, kind='reco')
-    f_conv = f_conv_true * np.sqrt(f_reco)
+    f_conv = conv_prob_novec(eta)
     L_tracker = TRT_length_novec(eta)
 
     if L_tracker == 0.0:
@@ -429,66 +414,29 @@ def conv_prob_finite_lifetime_batch(eta, ma, pa, gaggs, kind='true'):
 
     return p_out, c_out, l_out
 
-
-conv_prob_finite_lifetime = np.vectorize(conv_prob_finite_lifetime_novec)
-
-################################################
-## Data structures
-################################################
-
-# Template dictionaries used to build event arrays.
-# These define the keys that each particle/event dict will have.
-
-_particle_template = {
-    "eta"     : np.array([]),   # pseudorapidity
-    "phi"     : np.array([]),   # azimuthal angle (rad)
-    "pt"      : np.array([]),   # transverse momentum (GeV)
-    "p"       : np.array([]),   # 3-momentum magnitude (GeV)
-    "E"       : np.array([]),   # energy (GeV)
-    "l"       : np.array([]),   # ALP decay length per g_agg value (m) [ALP only]
-    "p_conv"  : np.array([]),   # conversion probability per g_agg [photons only]
-    "conv"    : np.array([]),   # bool: did photon convert? per g_agg [photons only]
-    "l_track" : np.array([]),   # available track length per g_agg (m) [photons only]
-}
-
-_event_template = {
-    "a"  : dict(_particle_template),   # ALP
-    "g1" : dict(_particle_template),   # photon 1
-    "g2" : dict(_particle_template),   # photon 2
-}
-
-_raw_event_template = {
-    "a"  : np.array([]),   # 4-momentum [E, px, py, pz]
-    "g1" : np.array([]),
-    "g2" : np.array([]),
-}
-
 ################################################
 ## I/O: reading Madgraph CSV files
 ################################################
 
 # ── Row-index map for the 7-row-per-event CSV format ─────────────────────────
 # Each event occupies exactly ROWS_PER_EVENT consecutive rows in the file.
-# Only the three rows below are actually used; the others are skipped.
+# Rows 0–1 (incoming quarks) are skipped; rows 2–6 are stored on the event
+# dict produced by ``read_data`` / ``raw_to_events``.
 #
 # *** If your CSV was produced by a different script and has a different
-#     particle ordering, change ROW_ALP, ROW_G1, ROW_G2 to match. ***
-#
-# To verify the ordering: inspect the first event in your CSV manually and
-# check that row ROW_ALP has the ALP energy (usually the largest of the three)
-# and that rows ROW_G1/ROW_G2 have the two photon four-momenta.
-# The helper function ``print_first_event`` below can assist with this.
+#     particle ordering, change ROW_J1/ROW_J2/ROW_ALP/ROW_G1/ROW_G2 to match.
+#     Use ``print_first_event`` to verify the ordering. ***
 
 ROWS_PER_EVENT = 7     # total rows written per event (including skipped particles)
-ROW_ALP        = 4     # row index of the ALP  four-momentum [E, px, py, pz]
-ROW_G1         = 5     # row index of photon 1 four-momentum
-ROW_G2         = 6     # row index of photon 2 four-momentum
+ROW_J1         = 2     # row index of VBF jet 1 four-momentum   → 'j1'
+ROW_J2         = 3     # row index of VBF jet 2 four-momentum   → 'j2'
+ROW_ALP        = 4     # row index of the ALP  four-momentum    → 'a'
+ROW_G1         = 5     # row index of photon 1 four-momentum    → 'g1'
+ROW_G2         = 6     # row index of photon 2 four-momentum    → 'g2'
 
-# Expected content of skipped rows (for documentation only — not enforced):
+# Skipped rows (for documentation only — not enforced):
 #   Row 0: incoming quark 1
 #   Row 1: incoming quark 2
-#   Row 2: VBF jet 1
-#   Row 3: VBF jet 2
 
 
 def print_first_event(run_name, data_dir='data'):
@@ -535,17 +483,17 @@ def read_data(run_name, num=10000, data_dir='data'):
     separated by semicolons.
 
     The rows that are actually read are controlled by the module-level
-    constants ``ROW_ALP``, ``ROW_G1``, ``ROW_G2`` (defaults: 4, 5, 6).
-    If your CSV has a different ordering, change those constants.
-    Call ``print_first_event`` to verify the ordering before running a
-    full analysis.
+    constants ``ROW_J1``, ``ROW_J2``, ``ROW_ALP``, ``ROW_G1``, ``ROW_G2``
+    (defaults: 2, 3, 4, 5, 6).  If your CSV has a different ordering, change
+    those constants.  Call ``print_first_event`` to verify the ordering
+    before running a full analysis.
 
     Default row layout (produced by ``lhe_to_csv.py``):
 
         Row 0: incoming quark 1   (skipped)
         Row 1: incoming quark 2   (skipped)
-        Row 2: VBF jet 1          (skipped)
-        Row 3: VBF jet 2          (skipped)
+        Row 2: VBF jet 1          → stored as 'j1'
+        Row 3: VBF jet 2          → stored as 'j2'
         Row 4: ALP                → stored as 'a'
         Row 5: photon 1           → stored as 'g1'
         Row 6: photon 2           → stored as 'g2'
@@ -563,8 +511,9 @@ def read_data(run_name, num=10000, data_dir='data'):
     Returns
     -------
     list of dict
-        Each element corresponds to one event and has keys ``'a'``, ``'g1'``,
-        ``'g2'``, each holding a NumPy array ``[E, px, py, pz]``.
+        Each element corresponds to one event and has keys ``'j1'``, ``'j2'``,
+        ``'a'``, ``'g1'``, ``'g2'``, each holding a NumPy array
+        ``[E, px, py, pz]``.
     """
     filepath = os.path.join(data_dir, run_name + '.csv')
     temp = pd.read_csv(filepath, sep=';', header=None, nrows=ROWS_PER_EVENT * num)
@@ -585,6 +534,8 @@ def read_data(run_name, num=10000, data_dir='data'):
             'a': coords[i, ROW_ALP],
             'g1': coords[i, ROW_G1],
             'g2': coords[i, ROW_G2],
+            'j1': coords[i, ROW_J1],
+            'j2': coords[i, ROW_J2],
         })
     return raw_events
 
@@ -612,14 +563,17 @@ def raw_to_events(raw_events, gaggs, ma):
     Returns
     -------
     list of dict
-        Each element has keys 'a', 'g1', 'g2'.  Each particle sub-dict
-        contains arrays indexed by event and/or g_{agg} grid point.
+        Each element has keys ``'a'``, ``'g1'``, ``'g2'``, ``'j1'``, ``'j2'``.
+        Each particle sub-dict contains scalar kinematics (eta, phi, pt, p, E,
+        px, py, pz); the ALP entry additionally has ``'l'`` (decay length per
+        g_agg), and the photon entries have ``'p_conv'``, ``'conv'``, and
+        ``'l_track'`` arrays indexed by g_agg grid point.
     """
     gaggs_arr = np.asarray(gaggs, dtype=np.float64)
     events = []
     for raw in raw_events:
-        ev = {'a': {}, 'g1': {}, 'g2': {}}
-        for ptcl in ('a', 'g1', 'g2'):
+        ev = {'a': {}, 'g1': {}, 'g2': {}, 'j1': {}, 'j2': {}}
+        for ptcl in ('a', 'g1', 'g2', 'j1', 'j2'):
             mom = raw[ptcl]
             p = np.sqrt(mom[1]**2 + mom[2]**2 + mom[3]**2)
             pt = np.sqrt(mom[1]**2 + mom[2]**2)
@@ -630,11 +584,15 @@ def raw_to_events(raw_events, gaggs, ma):
             ev[ptcl]['pt'] = pt
             ev[ptcl]['p'] = p
             ev[ptcl]['E'] = mom[0]
+            ev[ptcl]['px'] = mom[1]
+            ev[ptcl]['py'] = mom[2]
+            ev[ptcl]['pz'] = mom[3]
+
             if ptcl == 'a':
                 ev[ptcl]['l'] = decay_length_batch(ma, p, gaggs_arr)
-            else:
+            elif ptcl in ('g1', 'g2'):
                 pc, cv, lt = conv_prob_finite_lifetime_batch(
-                    eta, ma, ev['a']['p'], gaggs_arr, kind='true'
+                    eta, ma, ev['a']['p'], gaggs_arr
                 )
                 ev[ptcl]['p_conv'] = pc
                 ev[ptcl]['conv'] = cv
@@ -836,106 +794,6 @@ def Delta_R(eta1, eta2, phi1, phi2, alp_decay_length):
 ################################################
 ## Batch analysis
 ################################################
-
-def calculate_separations_2converted_displaced_isolated(
-        events, gaggs, pTcut=0., track_resolution=1.0e-4, check=False):
-    """
-    For each coupling in *gaggs*, select events where:
-      - The ALP has pT > *pTcut* (GeV), and
-      - Both photons convert inside the TRT,
-
-    and compute for each such event:
-      - Transverse track separation at the outer TRT wall (m).
-      - Average photon pseudorapidity.
-      - Displaced-vertex impact parameter (m).
-      - Delta-R at the ECAL (corrected for displacement).
-      - Delta-eta at the ECAL (displacement-corrected, phi=0 for both photons).
-
-    Parameters
-    ----------
-    events : list of dict
-        Output of ``raw_to_events``.
-    gaggs : array-like of float
-        Grid of couplings g_{agg} (GeV^{-1}).
-    pTcut : float, optional
-        Minimum ALP transverse momentum in GeV.  Default 0.
-    track_resolution : float, optional
-        Tracker spatial resolution in metres.  Default 1e-4 m = 0.1 mm.
-    check : bool, optional
-        If True, also return per-photon track lengths and event indices for
-        debugging.  Default False.
-
-    Returns
-    -------
-    separations : list of ndarray
-        One array per coupling value; each element is a track separation (m).
-        Events outside TRT acceptance are flagged with -1 and should be masked
-        before applying a separation cut.
-    average_etas : list of ndarray
-        Mean pseudorapidity of the two photons for each selected event.
-    impact_parameters : list of ndarray
-        Displaced-vertex impact parameter (m) for each selected event.
-    delta_Rs : list of ndarray
-        Effective Delta-R at the ECAL for each selected event.
-    delta_etas : list of ndarray
-        Effective Delta-eta at the ECAL (phi=0 for both photons).
-
-    If *check* is True, two additional lists are returned:
-    ltrack_list : list of ndarray
-        Track lengths [l_track1, l_track2] per selected event per coupling.
-    i_list : list of ndarray
-        Original event indices for each selected event.
-    """
-    seps_list    = []
-    av_eta_list  = []
-    imp_list     = []
-    DR_list      = []
-    Deta_list    = []
-    ltrack_list  = []
-    i_list       = []
-
-    for i_g, g in enumerate(gaggs):
-        seps      = []
-        av_eta    = []
-        imp_params = []
-        delta_rs  = []
-        delta_etas= []
-        ltracks   = []
-        i_vals    = []
-
-        for i, ev in enumerate(events):
-            passes_pT   = ev['a']['pt'] > pTcut
-            both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
-            if not (passes_pT and both_conv):
-                continue
-
-            eta1  = ev['g1']['eta'];  eta2  = ev['g2']['eta'];  eta_a = ev['a']['eta']
-            phi1  = ev['g1']['phi'];  phi2  = ev['g2']['phi'];  phi_a = ev['a']['phi']
-            l1    = ev['g1']['l_track'][i_g]
-            l2    = ev['g2']['l_track'][i_g]
-            l_a   = ev['a']['l'][i_g]
-
-            seps.append(separation_TRT(eta1, eta2, eta_a, phi1, phi2, phi_a, l_a))
-            av_eta.append((eta1 + eta2) / 2.0)
-            imp_params.append(displaced_vertex_TRT(eta_a, phi1, phi2, phi_a,
-                                                    l1, l2, l_a, track_resolution))
-            delta_rs.append(Delta_R(eta1, eta2, phi1, phi2, l_a))
-            delta_etas.append(Delta_R(eta1, eta2, 0., 0., l_a))
-            ltracks.extend([l1, l2])
-            i_vals.append(i)
-
-        seps_list.append(np.array(seps))
-        av_eta_list.append(np.array(av_eta))
-        imp_list.append(np.array(imp_params))
-        DR_list.append(np.array(delta_rs))
-        Deta_list.append(np.array(delta_etas))
-        ltrack_list.append(np.array(ltracks))
-        i_list.append(np.array(i_vals, dtype=int))
-
-    if check:
-        return seps_list, av_eta_list, imp_list, DR_list, Deta_list, ltrack_list, i_list
-    return seps_list, av_eta_list, imp_list, DR_list, Deta_list
-
 
 def calculate_splittings(events, gaggs, pTcut=0., B_TRT=2.):
     """
