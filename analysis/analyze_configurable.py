@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -143,7 +144,7 @@ def main():
             ltracks   = []
             i_vals    = []
 
-            for i, ev in enumerate(events):
+            for i, ev in enumerate[Any](events):
                 passes_pT = (ev['a']['pt'] > pT_cut) if mask_alp_pT else True # currently set to zero, can be changed later if needed 
                 alp_inside_tracker = -ev['a']['l'][i_g] * np.log(np.random.uniform()) < TRT_length(ev['a']['eta'])
 
@@ -154,6 +155,7 @@ def main():
                 eta2 = ev['g2']['eta']
                 eta_a = ev['a']['eta']
                 phi1 = ev['g1']['phi']
+
                 phi2 = ev['g2']['phi']
                 phi_a = ev['a']['phi']
                 l1 = ev['g1']['l_track'][i_g]
@@ -176,7 +178,13 @@ def main():
                         continue
                 if mask_merge:
                     delta_r=Delta_R(eta1, eta2, phi1, phi2, l_a)
-                    passes_merge = delta_r > delta_r_min and delta_r < delta_r_max
+                    if 0 < delta_r and delta_r < delta_r_min:
+                        both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
+                        passes_merge = both_conv
+                    elif delta_r_min <= delta_r  and delta_r <= delta_r_max:
+                        passes_merge = True
+                    else:
+                        passes_merge = False
                     if not passes_merge:
                         continue 
                 if analysis_mode=='phase2':
