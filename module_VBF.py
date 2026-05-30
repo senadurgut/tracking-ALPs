@@ -53,6 +53,7 @@ the script that converts Madgraph LHE output to this format.
 ## Load packages
 ################################################
 
+from typing import Any
 import numpy as np
 from numpy.random import uniform
 import pandas as pd
@@ -126,6 +127,48 @@ std_conv_fr = np.array([
     [0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
 ])
 
+## Bethe-Heitler conversion model
+## ---------------------------------------------
+## ``conv_prob_table`` is a 2-row array: row 0 is the upper edges of |eta| bins
+## and row 1 is the true conversion probability in that bin, obtained from a
+## material-budget (eta, t/X0) text file via the Bethe-Heitler formula
+##     f_conv = 1 - exp(-(7/9) * t/X0).
+## It defaults to the flat 0.4 placeholder (``conv_fr``); call
+## ``load_conv_prob_table(path)`` to populate it from a real material budget.
+
+conv_prob_table = conv_fr.copy()
+_conv_table_loaded = False
+
+
+def load_conv_prob_table(path):
+    BETHE_HEITLER_COEFF = 7.0 / 9.0
+
+    """Build the |eta| -> conversion-probability table from a two-column
+    ``(eta, t/X0)`` text file by applying Bethe-Heitler per row (no folding or
+    binning).  Points are sorted by |eta| and a final ``eta -> inf`` bin with
+    probability 0 is appended.  Updates the module-level ``conv_prob_table``
+    and returns it."""
+    global conv_prob_table, _conv_table_loaded
+    df = pd.read_csv(path, header=None, names=["eta", "t_over_X0"])
+    abs_eta = np.abs(df["eta"].to_numpy())
+    f_conv = 1.0 - np.exp(-BETHE_HEITLER_COEFF * df["t_over_X0"].to_numpy())
+    order = np.argsort(abs_eta)
+    conv_prob_table = np.array([
+        np.append(abs_eta[order], np.inf),
+        np.append(f_conv[order], 0.0),
+    ])
+    _conv_table_loaded = True
+    return conv_prob_table
+    
+def eta_region(eta, barrel_max=1.4, endcap_max=3.0):
+    """Classify a photon by |eta|: 'barrel' (|eta| <= barrel_max),
+    'endcap' (barrel_max < |eta| <= endcap_max), or None (out of acceptance)."""
+    a = abs(eta)
+    if a <= barrel_max:
+        return 'barrel'
+    if a <= endcap_max:
+        return 'endcap'
+    return None
 ################################################
 ## Physics: decay length
 ################################################
@@ -208,7 +251,8 @@ def _invert_cumulative_bisect(random2, d_length, L_tracker, f_conv, c_prob, maxi
 def conv_prob_novec(eta):
     """
     Return the true photon conversion probability for a single pseudorapidity
-    value, looked up from the ``conv_fr`` table.
+    value, looked up from the ``conv_prob_table`` (Bethe-Heitler from material
+    budget; see ``load_conv_prob_table``).
 
     Parameters
     ----------
@@ -218,10 +262,10 @@ def conv_prob_novec(eta):
     Returns
     -------
     float
-        True converted fraction in the |η| bin containing *eta*.
+        True converted fraction.
     """
-    i = np.searchsorted(conv_fr[0], abs(eta))
-    return conv_fr[1, i]
+    i = np.searchsorted(conv_prob_table[0], abs(eta))
+    return conv_prob_table[1, i]
 
 
 def std_conv_prob_novec(eta, kind='true'):
@@ -540,7 +584,7 @@ def read_data(run_name, num=10000, data_dir='data'):
     return raw_events
 
 
-def raw_to_events(raw_events, gaggs, ma):
+def raw_to_events(raw_events, gaggs, ma, era):
     """
     Convert a list of raw four-momentum arrays into fully processed event dicts.
 
@@ -569,6 +613,15 @@ def raw_to_events(raw_events, gaggs, ma):
         g_agg), and the photon entries have ``'p_conv'``, ``'conv'``, and
         ``'l_track'`` arrays indexed by g_agg grid point.
     """
+    if era == 'run3':
+        material_budget = "/home/export/sdurgut/scratch/alps/tracking_ALPs/data/material_budget/phase1_material_budget.txt"
+    elif era == 'phase2':
+        material_budget = "/home/export/sdurgut/scratch/alps/tracking_ALPs/data/material_budget/phase2_material_budget.txt"
+    else:
+        raise ValueError(f"era must be 'run3' or 'phase2', got {era!r}")
+
+    load_conv_prob_table(material_budget)
+
     gaggs_arr = np.asarray(gaggs, dtype=np.float64)
     events = []
     for raw in raw_events:
