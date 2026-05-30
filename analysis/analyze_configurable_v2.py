@@ -190,7 +190,7 @@ def main():
                     delta_r=Delta_R(eta1, eta2, phi1, phi2, l_a)
 
                     if era =='run3' and analysis_mode == 'parking':
-                        if delta_r <delta_r_min:
+                        if delta_r < ecal_cell_size:
                             both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
                             passes_merge = both_conv 
                         elif delta_r < delta_r_max:
@@ -214,7 +214,8 @@ def main():
                             elif delta_r <= delta_r_max: 
                                 passes_merge = True 
                             else: 
-                                passes_merge = False  
+                                passes_merge = False
+                        
                     if 'era' == 'phase2' and analysis_mode == 'scouting':
                         if delta_r <= delta_r_max: 
                             passes_merge=True
