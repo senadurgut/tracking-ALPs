@@ -186,10 +186,10 @@ def main():
                         else:
                             passes_merge = False 
 
-                    if era =='phase2' and analysis_mode == 'parking':
-                        if  eta_region(eta1) == 'barrel' and eta_region(eta2) == "barrel":
+                    elif era =='phase2' and analysis_mode == 'parking':
+                        if  eta_region(eta_a) == 'barrel':
                             cell_size = ecal_cell_size
-                        if eta_region(eta1) == 'endcap' and eta_region(eta2) == "endcap":
+                        elif eta_region(eta_a) == 'endcap':
                             cell_size = hgcal_cell_size(eta_a)
                         
                         if delta_r<=cell_size:
@@ -200,11 +200,13 @@ def main():
                         else: 
                             passes_merge=False
 
-                    if era == 'phase2' and analysis_mode == 'scouting':
+                    elif era == 'phase2' and analysis_mode == 'scouting':
                         if delta_r <= delta_r_max: 
                             passes_merge=True
                         else: 
                             passes_merge=False
+                    else:
+                        raise ValueError(f"unsupported era/analysis_mode pair, check your config")
                         
                     if not passes_merge: 
                         continue

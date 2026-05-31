@@ -159,9 +159,9 @@ def load_conv_prob_table(path):
     ])
     _conv_table_loaded = True
     return conv_prob_table
-    
+
 def eta_region(eta, barrel_max=1.4, endcap_max=3.0):
-    """Classify a photon by |eta|: 'barrel' (|eta| <= barrel_max),
+    """Classify an ALP by |eta|: 'barrel' (|eta| <= barrel_max),
     'endcap' (barrel_max < |eta| <= endcap_max), or None (out of acceptance)."""
     a = abs(eta)
     if a <= barrel_max:
@@ -169,6 +169,15 @@ def eta_region(eta, barrel_max=1.4, endcap_max=3.0):
     if a <= endcap_max:
         return 'endcap'
     return None
+
+def hgcal_cell_size(eta):
+    a = abs(eta)
+    if 1.4 <= a <= 2.3:
+        return 0.007
+    if 2.3 < a <= 3.0:
+        return 0.003
+    raise ValueError(f"hgcal_cell_size called outside endcap: |eta|={a:.3f}")
+
 ################################################
 ## Physics: decay length
 ################################################
