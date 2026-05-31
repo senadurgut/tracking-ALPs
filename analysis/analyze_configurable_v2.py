@@ -19,7 +19,6 @@ from module_VBF import (
     displaced_vertex_TRT,
     Delta_R,
     TRT_length,
-    load_conv_prob_table,
     eta_region,
     hgcal_cell_size
 )
@@ -56,8 +55,6 @@ def main():
     config = _load_config(args.config)
     config_stem = os.path.splitext(os.path.basename(args.config))[0]
 
-    load_conv_prob_table(args.material_budget)
-
     ma_list   = config['ma_list']
     gagg_list = config['gagg_list']
 
@@ -93,10 +90,9 @@ def main():
         delta_r_max = merge_mask_config.get('delta_r_max', 0.3)
     else:
         delta_r_max = 0.3
+        
+    ecal_cell_size = 0.025 
     
-    
-    ## hgcal_cell_size = to be implemented 
-
     alp_pT_cut_value = alp_pT_cut_config.get('cut_value', 0.0)
     pT_cut = alp_pT_cut_value if mask_alp_pT else 0.0
 
@@ -106,6 +102,8 @@ def main():
         'cli': vars(args),
         'config': config,
         'resolved': {
+            'era': era,
+            'analysis_mode': analysis_mode,
             'mask_eta': mask_eta,
             'mask_vbf': mask_vbf,
             'mask_merge': mask_merge,
@@ -117,10 +115,10 @@ def main():
             'deta_cut': deta_cut,
             'pT_cut': pT_cut,
             'delta_r_max': delta_r_max,
-            'analysis_mode': analysis_mode,
-            'sep_cut':          sep_cut          if analysis_mode == 'phase2' else None,
-            'disp_cut':         disp_cut         if analysis_mode == 'phase2' else None,
-            'track_resolution': track_resolution if analysis_mode == 'phase2' else None,
+            'sep_cut':          sep_cut          if analysis_mode == 'scouting' else None,
+            'disp_cut':         disp_cut         if analysis_mode == 'scouting' else None,
+            'track_resolution': track_resolution if analysis_mode == 'scouting' else None,
+            'ecal_cell_size': ecal_cell_size
         },
     }
     params_path = os.path.join(run_dir, f'params_{config_stem}.json')
@@ -143,14 +141,6 @@ def main():
         counts = [0] * len(gagg_list)
 
         for i_g, g in enumerate(gagg_list):
-            seps      = []
-            av_eta    = []
-            imp_params = []
-            delta_rs  = []
-            delta_etas= []
-            ltracks   = []
-            i_vals    = []
-
             for i, ev in enumerate(events):
                 passes_pT = (ev['a']['pt'] > pT_cut) if mask_alp_pT else True # currently set to zero, can be changed later if needed 
                 alp_inside_tracker = -ev['a']['l'][i_g] * np.log(np.random.uniform()) < TRT_length(ev['a']['eta'])
@@ -188,7 +178,6 @@ def main():
 
                     if era =='run3' and analysis_mode == 'parking':
                         cell_size = ecal_cell_size
-
                         if delta_r < cell_size:
                             both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
                             passes_merge = both_conv 
@@ -211,7 +200,7 @@ def main():
                         else: 
                             passes_merge=False
 
-                    if 'era' == 'phase2' and analysis_mode == 'scouting':
+                    if era == 'phase2' and analysis_mode == 'scouting':
                         if delta_r <= delta_r_max: 
                             passes_merge=True
                         else: 
