@@ -20,7 +20,8 @@ from module_VBF import (
     Delta_R,
     TRT_length,
     load_conv_prob_table,
-    eta_region
+    eta_region,
+    hgcal_cell_size
 )
 from scripts.analysis.file_helpers import ma_to_name
 from scripts.analysis.kinematics_helpers import compute_mjj
@@ -90,11 +91,8 @@ def main():
 
     if mask_merge:
         delta_r_max = merge_mask_config.get('delta_r_max', 0.3)
-        delta_r_min = merge_mask_config.get('delta_r_min', 0.025)
     else:
-        delta_r_min = 0
         delta_r_max = 0.3
-    ecal_cell_size = 0.025
     
     
     ## hgcal_cell_size = to be implemented 
@@ -119,7 +117,6 @@ def main():
             'deta_cut': deta_cut,
             'pT_cut': pT_cut,
             'delta_r_max': delta_r_max,
-            'delta_r_min': delta_r_min,
             'analysis_mode': analysis_mode,
             'sep_cut':          sep_cut          if analysis_mode == 'phase2' else None,
             'disp_cut':         disp_cut         if analysis_mode == 'phase2' else None,
@@ -190,7 +187,9 @@ def main():
                     delta_r=Delta_R(eta1, eta2, phi1, phi2, l_a)
 
                     if era =='run3' and analysis_mode == 'parking':
-                        if delta_r < ecal_cell_size:
+                        cell_size = ecal_cell_size
+
+                        if delta_r < cell_size:
                             both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
                             passes_merge = both_conv 
                         elif delta_r < delta_r_max:
@@ -198,24 +197,20 @@ def main():
                         else:
                             passes_merge = False 
 
-                    if era =='phase2' and analysis_mode == 'parking': 
-                        if eta_region(eta1) == 'barrel' and eta_region(eta2) == "barrel":
-                            if delta_r < ecal_cell_size: #ecal_cell_size
-                                both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g] 
-                                passes_merge = both_conv
-                            elif delta_r < delta_r_max: 
-                                passes_merge = True 
-                            else:
-                                passes_merge = False 
-                        if eta_region(eta1) == 'endcap' and eta_region(eta2) == "endcap": 
-                            if delta_r <= hgcal_cell_size: ## to be implemented 
-                                both_conv   = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
-                                passes_merge = both_conv
-                            elif delta_r <= delta_r_max: 
-                                passes_merge = True 
-                            else: 
-                                passes_merge = False
+                    if era =='phase2' and analysis_mode == 'parking':
+                        if  eta_region(eta1) == 'barrel' and eta_region(eta2) == "barrel":
+                            cell_size = ecal_cell_size
+                        if eta_region(eta1) == 'endcap' and eta_region(eta2) == "endcap":
+                            cell_size = hgcal_cell_size(eta_a)
                         
+                        if delta_r<=cell_size:
+                            both_conv = ev['g1']['conv'][i_g] and ev['g2']['conv'][i_g]
+                            passes_merge = both_conv 
+                        elif delta_r <= delta_r_max:
+                            passes_merge = True
+                        else: 
+                            passes_merge=False
+
                     if 'era' == 'phase2' and analysis_mode == 'scouting':
                         if delta_r <= delta_r_max: 
                             passes_merge=True
