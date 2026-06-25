@@ -10,7 +10,7 @@
 #
 #     # 2) After all tasks complete, merge the per-mass parts into the
 #     #    single CSV that the plotting notebook expects:
-#     python analysis/merge_parts.py --config configs/config1.json
+#     python scripts/analysis_helpers/merge_parts.py --config configs/config1.json
 #
 # To override the config without editing this file:
 #     sbatch --export=ALL,CONFIG=configs/config2.json scripts/slurm/run_array.sbatch
@@ -21,8 +21,8 @@
 #SBATCH --time=00:45:00              # per-task wall clock (one mass)
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=2G
-#SBATCH --output=logs/alp_%A_%a.out
-#SBATCH --error=logs/alp_%A_%a.err
+#SBATCH --output=logs/analysis_configurable_v2/%A_%a.out
+#SBATCH --error=logs/analysis_configurable_v2/%A_%a.err
 
 set -euo pipefail
 
@@ -42,7 +42,7 @@ mkdir -p logs "${RESULTS_DIR}"
 STEM=$(basename "${CONFIG}"); STEM=${STEM%.*}
 RUNF="${RESULTS_DIR}/.rundir_${SLURM_ARRAY_JOB_ID}"
 if mkdir "${RESULTS_DIR}/.lock_${SLURM_ARRAY_JOB_ID}" 2>/dev/null; then
-    python -c "import sys;sys.path.insert(0,'analysis');from analyze_configurable_v2 import _run_dir;print(_run_dir('${RESULTS_DIR}','${STEM}'))" > "${RUNF}"
+    python3 -c "import sys;sys.path.insert(0,'analysis');from analyze_configurable_v2 import _run_dir;print(_run_dir('${RESULTS_DIR}','${STEM}'))" > "${RUNF}"
 fi
 until [ -s "${RUNF}" ]; do sleep 1; done
 RUN_DIR=$(cat "${RUNF}")
@@ -57,7 +57,7 @@ echo "  seed:        ${SEED}"
 echo "  era:         $(jq -r '.era' "${CONFIG}")"
 echo "  analysis-mode: $(jq -r '.analysis_mode' "${CONFIG}")"
 
-python analysis/analyze_configurable_parallel.py \
+python3 analysis/analyze_configurable_parallel.py \
     --config       "${CONFIG}" \
     --mass-index   "${SLURM_ARRAY_TASK_ID}" \
     --num-events   "${NUM_EVENTS}" \

@@ -53,6 +53,7 @@ def main():
     ma_list = config['ma_list']
 
     run_dir = args.run_dir or os.path.join(args.results_dir, f'run_{config_stem}')
+    stem = os.path.basename(run_dir.rstrip('/')).removeprefix('run_')
     parts_dir = os.path.join(run_dir, 'parts')
     if not os.path.isdir(parts_dir):
         raise SystemExit(f'No parts directory found at {parts_dir}.  '
@@ -91,7 +92,7 @@ def main():
     out_rows = [r for _, r in rows]
 
     header = ['g_agg'] + [str(x) for x in gagg_list]
-    out_path = os.path.join(run_dir, f'results_{config_stem}.csv')
+    out_path = os.path.join(run_dir, f'results_{stem}.csv')
     pd.DataFrame(columns=header).to_csv(out_path, index=False)
     pd.DataFrame(out_rows).to_csv(out_path, mode='a', index=False, header=False)
     print(f'Wrote {out_path}  ({len(out_rows)} rows)')
