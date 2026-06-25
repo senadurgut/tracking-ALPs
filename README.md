@@ -160,7 +160,7 @@ Parallel over masses (one SLURM array task per mass), then merge the parts:
 
 ```bash
 sbatch --array=0-30 --export=ALL,CONFIG=configs/config8.json scripts/slurm/run_array.sbatch
-python analysis/merge_parts.py --config configs/config8.json
+python scripts/analysis_helpers/merge_parts.py --config configs/config8.json
 ```
 
 Set `--array` to `len(ma_list) - 1`. Output goes to `results/run_<stem>/results_<stem>.csv`;
@@ -168,7 +168,7 @@ if that dir already exists a `_NN` suffix is added (e.g. `run_config8_01`). For 
 suffixed run, point the merge at the same dir printed under `run-dir:` in the log:
 
 ```bash
-python analysis/merge_parts.py --config configs/config8.json --run-dir results/run_config8_01
+python3 scripts/analysis_helpers/merge_parts.py --config configs/config8.json --run-dir results/run_config8_01
 ```
 
 ### Step 4 — Make plots

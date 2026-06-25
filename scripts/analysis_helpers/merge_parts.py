@@ -38,6 +38,8 @@ def _parse_args():
                    help='Same config file passed to analyze_configurable_parallel.py.')
     p.add_argument('--results-dir', default='results',
                    help='Top-level results directory (default: results).')
+    p.add_argument('--run-dir', default=None,
+                   help='Run dir to merge; defaults to <results-dir>/run_<stem>.')
     p.add_argument('--strict', action='store_true',
                    help='Fail if any mass index in ma_list is missing a part file.')
     return p.parse_args()
@@ -50,7 +52,7 @@ def main():
     gagg_list = config['gagg_list']
     ma_list = config['ma_list']
 
-    run_dir = os.path.join(args.results_dir, f'run_{config_stem}')
+    run_dir = args.run_dir or os.path.join(args.results_dir, f'run_{config_stem}')
     parts_dir = os.path.join(run_dir, 'parts')
     if not os.path.isdir(parts_dir):
         raise SystemExit(f'No parts directory found at {parts_dir}.  '
