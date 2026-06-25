@@ -145,21 +145,30 @@ The layout assumed by `lhe_to_csv.py` is:
 
 ### Step 3 — Run the analysis
 
-The default mass grid is 32 points log-spaced from 0.01 to 10 GeV
-(`np.logspace(-2, 1, num=32)`), corresponding to indices 0–31.
+The analysis is config-driven. `analysis/analyze_configurable_v2.py` is the
+single source of truth for the physics; `analysis/analyze_configurable_parallel.py`
+imports its logic and adds per-mass / SLURM-array support. The mass grid and cut
+parameters live in the config (`ma_list`, `gagg_list`, etc.).
+
+Full sweep (all masses, one process):
 
 ```bash
-# Analyse a single mass, e.g. index 9
-python Analyze_madgraph_output.py 9
+python analysis/analyze_configurable_v2.py --config configs/config8.json
 ```
 
-Results are written to `results/results_vbf_*.csv`, and a `results/params.csv`
-file is written (overwriting any previous one) recording the cut parameters
-used. All masses in a batch must be run with the same parameters.
-To run all masses in parallel on a cluster (e.g. with Slurm):
+Parallel over masses (one SLURM array task per mass), then merge the parts:
 
 ```bash
-for i in $(seq 0 31); do sbatch --wrap="python Analyze_madgraph_output.py $i"; done
+sbatch --array=0-30 --export=ALL,CONFIG=configs/config8.json scripts/slurm/run_array.sbatch
+python analysis/merge_parts.py --config configs/config8.json
+```
+
+Set `--array` to `len(ma_list) - 1`. Output goes to `results/run_<stem>/results_<stem>.csv`;
+if that dir already exists a `_NN` suffix is added (e.g. `run_config8_01`). For a
+suffixed run, point the merge at the same dir printed under `run-dir:` in the log:
+
+```bash
+python analysis/merge_parts.py --config configs/config8.json --run-dir results/run_config8_01
 ```
 
 ### Step 4 — Make plots
