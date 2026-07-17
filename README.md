@@ -92,8 +92,88 @@ cd /path/to/ALP/tools/MG5_aMC_v3_5_13
 
 ### Step 1 — Run Madgraph
 
-Generate VBF→ALP→γγ events for each ALP mass using your Madgraph UFO model.
-The code expects the ALP PDG ID to be `36` (edit `ALP_PDG_ID` in `lhe_to_csv.py` if yours differs).
+Events were generated at parton level with **MadGraph5_aMC@NLO 3.5.13**
+and the `ALP-h_UFO` model. The matrix-element process is electroweak
+VBF-like ALP production with two jets, followed by the ALP decay to two
+photons:
+
+```text
+import model ALP-h_UFO --modelname
+define j = u c d s b u~ c~ d~ s~ b~ g
+generate p p > j j ax QCD=0, ax > a a
+output CMS
+```
+`QCD=0` selects the electroweak production contribution. Because the decay
+`ax > a a` is included in the matrix element, the LHE event record contains
+the ALP (PDG ID 36) as an intermediate particle with status 2 and the two
+photons (PDG ID 22) as final-state particles with status 1.
+
+The principal run-card settings are:
+
+| Setting | Value |
+|---------|-------|
+| `run_tag` | `tag_1` |
+| `nevents` | 10,000 unweighted events per run |
+| `iseed` | 0 (MadGraph assigns the seed automatically) |
+| Beam particles | proton–proton |
+| `ebeam1`, `ebeam2` | 6800 GeV each (`sqrt(s) = 13.6 TeV`) |
+| `pdlabel` | `nn23lo1` |
+| `lhaid` | 230000 |
+| Renormalization/factorization scales | dynamic (`fixed_ren_scale = False`, `fixed_fac_scale = False`) |
+| `dynamical_scale_choice` | -1 |
+| `scalefact` | 1.0 |
+| `event_norm` | `average` |
+| `gridpack` | `False` |
+| `nhel` | 0 |
+| `sde_strategy` | 1 |
+| `bwcutoff` | 15.0 |
+| `ptj`, `pta` | 0.0 GeV |
+| `etaj` | 5.0 |
+| `etaa` | 0.0 |
+| `drjj`, `draa`, `draj` | 0.0 |
+| `mmjj`, `mmaa` | 0.0 GeV |
+| `xptj`, `xpta` | 0.0 GeV |
+| `xetamin`, `deltaeta` | 0.0 |
+| `maxjetflavor` | 4 |
+| `cut_decays` | `False` |
+| Systematics | enabled with \(\mu_R,\mu_F = 0.5,1,2\) and PDF error sets |
+
+No generator-level transverse-momentum, photon-isolation, pair-mass, or
+minimum-\(\Delta R\) cuts are imposed by this card. In addition,
+`cut_decays = False` means generic cuts are not applied to particles from the
+specified ALP decay chain. The only finite rapidity setting is `etaj = 5.0`.
+
+The ALP parameters are set in `param_card.dat`:
+
+```text
+Block mass
+   36 <m_a in GeV>  # Max
+
+Block effcouplings
+    5 1.000000e+00  # gaa
+    7 1.000000e+02  # fs
+
+DECAY 36 Auto       # Wax
+```
+
+The width must be recomputed after changing the mass. `DECAY 36 Auto` lets
+MadGraph calculate the corresponding ALP width at generation time.
+Note that a reference value of coupling is used for each mass so the cross section must be scaled after generation, according to the equation: \n
+$$\sigma(pp\to a\,jj) \approx 180~\mathrm{pb}
+\left(\frac{\gagg}{10^{-2}\GeV^{-1}}\right)^{2}$$ \n 
+
+
+Cards for a single mass point are provided as an example inside /model/Cards.
+
+#### Mass grid and event batches
+
+The generated ALP mass points are:
+
+```text
+0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1,
+0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 2.0, 5.0, 10.0, 100.00 GeV
+```
+
 
 ### Step 2 — Convert LHE files to CSV
 
