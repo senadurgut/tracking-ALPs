@@ -158,9 +158,10 @@ DECAY 36 Auto       # Wax
 
 The width must be recomputed after changing the mass. `DECAY 36 Auto` lets
 MadGraph calculate the corresponding ALP width at generation time.
-Note that a reference value of coupling is used for each mass so the cross section must be scaled after generation, according to the equation: \n
+Note that a reference value of coupling is used for each mass so the cross section must be scaled after generation, according to the equation:
+
 $$\sigma(pp\to a\,jj) \approx 180~\mathrm{pb}
-\left(\frac{\gagg}{10^{-2}\GeV^{-1}}\right)^{2}$$ \n 
+\left(\frac{\g_{\gamma\gamma}}{10^{-2}\text{GeV}^{-1}}\right)^{2}$$ 
 
 
 Cards for a single mass point are provided as an example inside /model/Cards.
