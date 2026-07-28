@@ -13,9 +13,12 @@ Displacement is a FIT discriminant in Run 3 (2D mass-displacement fit), NOT a se
 so it does not appear as a suppression factor here.
 """
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import kl_common as kl
+
+_BKG = Path(__file__).resolve().parent.parent    # tracking_ALPs/bkg (data/ lives here)
 
 # --- selection constants (config7 + analyze_configurable_v2.py defaults) ---
 ETA_LO, ETA_HI = 0.0, 2.5      # mask_eta.eta_range
@@ -26,7 +29,7 @@ LUMI_FB        = 312.0         # Run 3 parking integrated luminosity
 # --- hard-sample normalization (w_hard = physical VBF K_L->gg events represented by one row) ---
 SIGMA_HARD_PB  = 3.6413e-3 * 1e9   # sigma_hard(pThat>80) [pb]
 N_HARD         = 20e6              # ALL generated hard events (carries the VBF rate; NOT the row count)
-SAMPLE_CSV     = "data/kl_vbf_sample.csv"
+SAMPLE_CSV     = str(_BKG / "data" / "kl_vbf_sample.csv")
 
 def cutflow_run3(df, P_conv, rng, tick):
     """Apply config7's non-VBF cut chain to the hard sample; return the (produced, in-tracker,

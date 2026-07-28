@@ -18,15 +18,18 @@ import argparse
 import json
 import sys
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+_BKG = Path(__file__).resolve().parent.parent    # tracking_ALPs/bkg (data/ lives here)
 TRACKING = "/home/export/sdurgut/scratch/alps/tracking_ALPs"
 sys.path.insert(0, TRACKING)
 sys.path.insert(0, TRACKING + "/analysis")
+sys.path.insert(0, str(_BKG / "analysis"))       # kl_common lives here
 import kl_common as kl
 from module_VBF import (read_data, raw_to_events, TRT_length, Delta_R,
                         separation_TRT, displaced_vertex_TRT, eta_region, hgcal_cell_size)
@@ -130,7 +133,7 @@ def select_kl(cfg, cuts, rng, max_rows, tick):
        Run 3 merged bin (dR<cell) requires both convert (use_tracks=True, as in run3_parking.py)."""
     cols = (["kl_pt", "kl_eta", "kl_phi", "g1_eta", "g1_phi", "g2_eta", "g2_phi", cfg["iso_col"]]
             if cfg["hard"] else ["pt", "eta", "phi", cfg["iso_col"]])
-    df = pd.read_csv(cfg["sample"], usecols=cols)
+    df = pd.read_csv(_BKG / cfg["sample"], usecols=cols)
     if max_rows and len(df) > max_rows:
         df = df.sample(n=max_rows, random_state=0)
     tick(f"K_L rows: {len(df):,}")

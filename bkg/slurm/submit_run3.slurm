@@ -21,5 +21,5 @@ cd "$WORKDIR"
 mkdir -p logs
 
 echo "host=$(hostname)"
-"$PYTHON" run3_parking.py
+"$PYTHON" analysis/run3_parking.py
 echo "done"

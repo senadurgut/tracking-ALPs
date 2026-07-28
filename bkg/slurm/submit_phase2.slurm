@@ -22,5 +22,5 @@ cd "$WORKDIR"
 mkdir -p logs
 
 echo "host=$(hostname)"
-"$PYTHON" phase2_scouting.py
+"$PYTHON" analysis/phase2_scouting.py
 echo "done"

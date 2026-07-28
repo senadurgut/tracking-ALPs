@@ -44,11 +44,9 @@ import matplotlib
 # paths / imports of the analysis package
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path("/home/export/sdurgut/scratch/alps/tracking_ALPs")
-FORESEE_ROOT = Path("/home/export/sdurgut/scratch/alps/bkg/FORESEE")
-ALP_DIR      = FORESEE_ROOT / "alp"
+BKG_DIR      = Path(__file__).resolve().parent.parent   # tracking_ALPs/bkg
 
-for p in (str(PROJECT_ROOT), str(PROJECT_ROOT / "analysis"),
-          str(FORESEE_ROOT), str(ALP_DIR)):
+for p in (str(PROJECT_ROOT), str(PROJECT_ROOT / "analysis"), str(BKG_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -62,11 +60,11 @@ from scripts.analysis_helpers.kinematics_helpers import compute_mjj   # noqa: E4
 # ---------------------------------------------------------------------------
 # configuration  (single source of truth -- was scattered across notebooks)
 # ---------------------------------------------------------------------------
-HARD_CSV   = ALP_DIR / "kl_vbf_sample.csv"
-SOFT_CSV   = ALP_DIR / "kl_sample.csv"
+HARD_CSV   = BKG_DIR / "data" / "kl_vbf_sample.csv"
+SOFT_CSV   = BKG_DIR / "data" / "kl_sample.csv"
 ALP_CSVDIR = PROJECT_ROOT / "data" / "cmsrun3-csvs"
-CACHE_DIR  = ALP_DIR / "notebooks"          # reuse the existing .npy caches
-PLOT_DIR   = ALP_DIR / "plots"
+CACHE_DIR  = BKG_DIR / "data"                # .npy caches now live in data/
+PLOT_DIR   = BKG_DIR / "plots"
 
 # physics constants
 BR_KL_GG  = 5.47e-4          # Br(K_L -> gamma gamma)

@@ -53,7 +53,7 @@ if [ "${DUMP:-0}" = "1" ]; then
 fi
 
 echo "task=$TASK mode=$MODE seed=$SEED nev=$NEV host=$(hostname)"
-"$PYTHON" eps_vbf_pythia.py \
+"$PYTHON" generation/eps_vbf_pythia.py \
     --mode "$MODE" --n-events "$NEV" --seed "$SEED" \
     --pthatmin 80 --out-json "$JSON" --progress "${PROGRESS:-10000}" "${DUMP_ARG[@]}"
 echo "done -> $JSON"

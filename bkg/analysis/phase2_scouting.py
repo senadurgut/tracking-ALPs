@@ -14,9 +14,12 @@ Input: kl_sample.csv (inclusive K_L; NO photon columns -> each K_L is decayed to
 Unlike Run 3, the displacement here is an EXPLICIT selection cut (no data-driven sidebands at L1).
 """
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import kl_common as kl
+
+_BKG = Path(__file__).resolve().parent.parent    # tracking_ALPs/bkg (data/ lives here)
 
 # --- selection constants (config10) ---
 ETA_LO, ETA_HI = 1.4, 3.0      # mask_eta.eta_range (HGCAL)
@@ -29,7 +32,7 @@ LUMI_FB        = 3000.0        # Phase-2 integrated luminosity (250/fb first-yea
 # --- soft-sample normalization (w_soft = physical K_L->gg events represented by one row) ---
 SIGMA_INEL_PB  = 78.585e9      # inelastic pp cross section [pb] (78.585 mb)
 N_SOFT         = 2e6           # generated inelastic events (all K_L, both hemispheres)
-SAMPLE_CSV     = "data/kl_sample.csv"
+SAMPLE_CSV     = str(_BKG / "data" / "kl_sample.csv")
 
 def cutflow_phase2(df, P_conv, rng, tick):
     """Apply config10's full scouting chain to the soft sample; return the (produced, in-tracker,

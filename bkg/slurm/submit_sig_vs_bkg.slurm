@@ -29,5 +29,5 @@ A=${ANALYSES[$SLURM_ARRAY_TASK_ID]}
 MAXKL=${MAXKL:-400000}
 
 echo "host=$(hostname)  analysis=$A  max_kl=$MAXKL"
-"$PYTHON" plot_sig_vs_bkg.py --analysis "$A" --max-kl "$MAXKL"
+"$PYTHON" plotting/plot_sig_vs_bkg.py --analysis "$A" --max-kl "$MAXKL"
 echo "done -> plots/sig_vs_bkg_${A}.png"

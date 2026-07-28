@@ -12,11 +12,14 @@ Run (after the samples are regenerated with the iso columns):  python plot_kl_is
 """
 import argparse
 import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+_BKG = Path(__file__).resolve().parent.parent    # tracking_ALPs/bkg (data/ lives here)
 
 C_RUN3, C_PH2 = "#0072B2", "#D55E00"   # Okabe-Ito blue / vermillion (colorblind-safe, fixed order)
 
@@ -29,8 +32,8 @@ def load_iso(path, col):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hard", default="data/kl_vbf_sample.csv")
-    ap.add_argument("--soft", default="data/kl_sample.csv")
+    ap.add_argument("--hard", default=str(_BKG / "data" / "kl_vbf_sample.csv"))
+    ap.add_argument("--soft", default=str(_BKG / "data" / "kl_sample.csv"))
     ap.add_argument("--xmax", type=float, default=20.0, help="GeV, upper edge for the plots")
     ap.add_argument("--out", default="plots/kl_iso.png")
     args = ap.parse_args()
