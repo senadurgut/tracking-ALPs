@@ -1,0 +1,9 @@
+# Large data + regenerable outputs -- never track these.
+# data/    = kl_*.csv (3.8 GB), out/ per-task chunks (3.7 GB), *.npy caches
+# archive/ = FORESEE-only code + session artifacts
+data/
+archive/
+logs/
+slurm/logs/
+__pycache__/
+*.pyc
