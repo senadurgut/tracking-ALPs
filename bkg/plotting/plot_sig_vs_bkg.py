@@ -43,14 +43,35 @@ ACT_CUT   = 0.0                      # keep events with hadronic activity <= ACT
 SIG_MASSES = [0.3, 0.5, 1.0]         # GeV
 GAGG_BENCH = {0.3: 8.0e-5, 0.5: 2.63e-5, 1.0: 6.4e-6}   # displaced-in-tracker benchmark per mass
 N_GEN     = 40000
+BR_KL_GG     = 5.47e-4               # Br(K_L -> gamma gamma)
+SIG_XSEC_1E2 = 180.0                 # sigma_VBF(a) [pb] at gagg=1e-2 GeV^-1 (~gagg^2, Br(a->gg)=1)
 C_SIG     = {0.3: "#0072B2", 0.5: "#009E73", 1.0: "#E69F00"}   # Okabe-Ito, fixed per mass
 
 ANALYSES = {
     "run3":   dict(era="run3",   config=TRACKING + "/configs/config7.json",
-                   sample="data/kl_vbf_sample.csv",  iso_col="kl_iso_had_pt", hard=True,  lumi=312),
+                   sample="data/kl_vbf_sample.csv",  iso_col="kl_iso_had_pt", hard=True,  lumi=312,
+                   kl_sigma_pb=3.6413e-3 * 1e9, kl_ngen=20e6),   # sigma_hard(pThat>80); N_HARD (VBF baked in)
     "phase2": dict(era="phase2", config=TRACKING + "/configs/config10.json",
-                   sample="data/kl_sample.csv",      iso_col="iso_had_pt",    hard=False, lumi=3000),
+                   sample="data/kl_sample.csv",      iso_col="iso_had_pt",    hard=False, lumi=3000,
+                   kl_sigma_pb=78.585e9,        kl_ngen=2e6),    # sigma_inel; N_SOFT
 }
+
+def selection_lines(cfg, cuts, act_cut):
+    """Human-readable list of the cuts applied (for the text panel)."""
+    lo, hi = cuts["eta_range"]
+    L = ["in-tracker decay (always on)",
+         f"eta in [{lo}, {hi}]  (both photons)"]
+    if cfg["era"] == "run3":
+        L += ["VBF: baked into K_L sample; applied to signal:",
+              f"     lead>{cuts['leading_jet_pt_cut']:.0f}, sub>{cuts['sub_jet_pt_cut']:.0f}, "
+              f"mjj>{cuts['mjj_cut']:.0f}, |dEta|>{cuts['deta_cut']:.0f}",
+              f"merge: dR < {cuts['delta_r_max']}  (dR<{cuts['ecal_cell_size']} needs both convert)"]
+    else:
+        L += [f"merge: dR <= {cuts['delta_r_max']}", "both photons convert",
+              f"separation_TRT >= {cuts['sep_cut']:g} m",
+              f"displaced_vertex_TRT >= {cuts['disp_cut']:g} m  (res {cuts['track_resolution']:g} m)"]
+    L.append(f"hadronic activity: {'<= %g GeV' % act_cut if act_cut is not None else 'NO CUT'}")
+    return L
 
 
 def load_cuts(path):
@@ -127,17 +148,31 @@ def select_signal(events, cuts):
     return np.array(pt), np.array(disp)
 
 
-def select_kl(cfg, cuts, rng, max_rows, tick):
-    """Full K_L selection (mirrors run3_parking/phase2_scouting) + activity<=ACT_CUT, binary conversion.
-       Returns (pt[], disp[]) for survivors; disp for the two-photon-converting subset.
-       Run 3 merged bin (dR<cell) requires both convert (use_tracks=True, as in run3_parking.py)."""
+def select_kl(cfg, cuts, rng, max_rows, tick, act_cut, chunk=250_000):
+    """Stream the K_L sample in chunks (bounded memory); full selection + activity cut (act_cut = the
+       threshold, None disables it). max_rows caps rows read (0 = all). Returns (pt[], disp[], n_read)."""
     cols = (["kl_pt", "kl_eta", "kl_phi", "g1_eta", "g1_phi", "g2_eta", "g2_phi", cfg["iso_col"]]
             if cfg["hard"] else ["pt", "eta", "phi", cfg["iso_col"]])
-    df = pd.read_csv(_BKG / cfg["sample"], usecols=cols)
-    if max_rows and len(df) > max_rows:
-        df = df.sample(n=max_rows, random_state=0)
-    tick(f"K_L rows: {len(df):,}")
+    P_conv = kl.make_pconv(cfg["era"], cuts["eta_range"][1])
+    pt_all, b_all, total = [], [], 0
+    for df in pd.read_csv(_BKG / cfg["sample"], usecols=cols, chunksize=chunk):   # stream: bounded memory
+        if max_rows and total >= max_rows:
+            break
+        if max_rows and total + len(df) > max_rows:
+            df = df.iloc[: max_rows - total]
+        total += len(df)
+        pt_s, b_s = _select_chunk(df, cfg, cuts, rng, P_conv, act_cut)
+        pt_all.append(pt_s); b_all.append(b_s)
+        tick(f"  read {total:,} rows, survivors so far {sum(len(x) for x in pt_all):,}")
+    pt = np.concatenate(pt_all) if pt_all else np.array([])
+    b  = np.concatenate(b_all) if b_all else np.array([])
+    tick(f"K_L done: {total:,} rows -> {len(pt):,} survivors, {len(b):,} with displacement")
+    return pt, b, total
 
+
+def _select_chunk(df, cfg, cuts, rng, P_conv, act_cut):
+    """Vectorized K_L selection on one chunk; returns (pt_surv[], disp[]). Run 3 merged bin
+       (dR<cell) requires both convert (use_tracks=True, as in run3_parking.py)."""
     act = pd.to_numeric(df[cfg["iso_col"]], errors="coerce").to_numpy()
     if cfg["hard"]:
         pt_k, eta_k, phi_k = df["kl_pt"].to_numpy(), df["kl_eta"].to_numpy(), df["kl_phi"].to_numpy()
@@ -152,13 +187,13 @@ def select_kl(cfg, cuts, rng, max_rows, tick):
     L = TRT_length(eta_k)
     decay_dist = -(p / M_KL) * kl.CTAU_KL * np.log(rng.uniform(size=len(p)))
     lo, hi = cuts["eta_range"]
-    keep = ((act <= ACT_CUT) & (L > 0) & (decay_dist < L)                   # activity + in-tracker decay
+    act_ok = np.ones(len(p), dtype=bool) if act_cut is None else (act <= act_cut)
+    keep = (act_ok & (L > 0) & (decay_dist < L)                             # activity + in-tracker decay
             & (np.abs(e1) >= lo) & (np.abs(e1) <= hi)
             & (np.abs(e2) >= lo) & (np.abs(e2) <= hi))                      # mask_eta
 
     # binary conversion of both photons (decay-position corrected); gates displacement everywhere,
     # and is a hard cut for scouting + the run3 merged bin.
-    P_conv = kl.make_pconv(cfg["era"], hi)
     both = ((rng.uniform(size=len(p)) < kl.conv_prob_disp(P_conv, e1, decay_dist))
             & (rng.uniform(size=len(p)) < kl.conv_prob_disp(P_conv, e2, decay_dist)))
     l1 = np.where(both, L - rng.uniform(decay_dist, np.maximum(L, decay_dist), size=len(p)), 0.0)
@@ -181,25 +216,27 @@ def select_kl(cfg, cuts, rng, max_rows, tick):
     disp_mask = keep & both
     b = kl.displaced_vertex_TRT(eta_k[disp_mask], f1[disp_mask], f2[disp_mask], phi_k[disp_mask],
                                 l1[disp_mask], l2[disp_mask], decay_dist[disp_mask], TRACK_RES)
-    tick(f"survivors: {int(keep.sum()):,}   with 2-conv (displacement): {int(disp_mask.sum()):,}")
     return pt_k[keep], np.asarray(b)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--analysis", choices=list(ANALYSES), required=True)
-    ap.add_argument("--max-kl", type=int, default=400000, help="subsample K_L rows (shape only)")
+    ap.add_argument("--max-kl", type=int, default=400000, help="cap K_L rows read (0 = all; yields exact only then)")
+    ap.add_argument("--no-activity-cut", action="store_true", help="drop the hadronic-activity requirement")
+    ap.add_argument("--chunk", type=int, default=250_000, help="CSV read chunk size (lower on tight-memory nodes)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     cfg = ANALYSES[args.analysis]
     cuts = load_cuts(cfg["config"])
+    act_cut = None if args.no_activity_cut else ACT_CUT
     t0 = time.time()
     def tick(m): print(f"  [{time.time()-t0:6.1f}s] {m}", flush=True)
 
     rng = np.random.default_rng(0)
-    tick(f"=== {args.analysis} (era={cfg['era']}) ===  K_L background")
+    tick(f"=== {args.analysis} (era={cfg['era']}) ===  activity_cut={act_cut}")
     np.random.seed(1234)
-    kl_pt, kl_b = select_kl(cfg, cuts, rng, args.max_kl, tick)
+    kl_pt, kl_b, kl_read = select_kl(cfg, cuts, rng, args.max_kl, tick, act_cut, args.chunk)
 
     sig = {}
     for ma in SIG_MASSES:
@@ -209,7 +246,14 @@ def main():
         sig[ma] = select_signal(events, cuts)
         tick(f"signal m_a={ma}: {len(sig[ma][0]):,} survivors, {len(sig[ma][1]):,} with displacement")
 
-    fig, (axm, axp, axd) = plt.subplots(1, 3, figsize=(15, 4.3))
+    # --- physical yields (exact when --max-kl 0; else K_L is a subsample) ---
+    w_kl = cfg["kl_sigma_pb"] / cfg["kl_ngen"] * cfg["lumi"] * 1000.0 * BR_KL_GG
+    N_kl = len(kl_pt) * w_kl
+    def sig_yield(ma):
+        g = GAGG_BENCH[ma]
+        return len(sig[ma][0]) / N_GEN * cfg["lumi"] * 1000.0 * SIG_XSEC_1E2 * (g / 1e-2) ** 2
+
+    fig, ((axm, axp), (axd, axt)) = plt.subplots(2, 2, figsize=(13, 9))
 
     # --- mass ---
     mbins = np.linspace(0.0, 1.2, 121)
@@ -231,7 +275,8 @@ def main():
     if len(kl_pt):
         axp.hist(kl_pt, bins=pbins, density=True, histtype="step", lw=2.2, color="black", ls="--",
                  label=r"$K_L$")
-    axp.set_xscale("log"); axp.set_xlabel(r"diphoton $p_T$ [GeV]"); axp.set_ylabel("normalized / bin")
+    axp.set_xscale("log"); axp.set_yscale("log")
+    axp.set_xlabel(r"diphoton $p_T$ [GeV]"); axp.set_ylabel("normalized / bin")
     axp.legend(fontsize=8, frameon=False); axp.grid(True, which="both", alpha=0.15)
 
     # --- displacement ---
@@ -250,12 +295,31 @@ def main():
     axd.set_ylabel("normalized / bin"); axd.legend(fontsize=8, frameon=False)
     axd.grid(True, which="both", alpha=0.15)
 
-    fig.suptitle(f"{args.analysis}: signal vs $K_L$, full selection + activity $\\leq$ {ACT_CUT:g} GeV",
-                 fontsize=11)
+    # --- text panel: selection + counts + yields ---
+    axt.axis("off")
+    info = [f"{args.analysis}   (config {'7' if cfg['era'] == 'run3' else '10'})",
+            f"lumi = {cfg['lumi']} fb^-1",
+            "", "SELECTION"]
+    info += ["  " + s for s in selection_lines(cfg, cuts, act_cut)]
+    sub = "" if args.max_kl == 0 else "   [SUBSAMPLE -- use --max-kl 0 for full yields]"
+    info += ["", "K_L BACKGROUND" + sub,
+             f"  rows read : {kl_read:,}",
+             f"  survivors : {len(kl_pt):,}",
+             f"  w/ 2-conv : {len(kl_b):,}   (enter displacement)",
+             f"  yield     : {N_kl:.3e} events",
+             "", "SIGNAL   (survivors / N_gen  ->  yield @ benchmark g)"]
+    for ma in SIG_MASSES:
+        info.append(f"  m={ma} (g={GAGG_BENCH[ma]:.1e}) : {len(sig[ma][0]):>4}/{N_GEN} -> {sig_yield(ma):.2e}")
+    axt.text(0.0, 1.0, "\n".join(info), va="top", ha="left", family="monospace",
+             fontsize=9, transform=axt.transAxes)
+
+    act_txt = "no activity cut" if act_cut is None else rf"activity $\leq$ {ACT_CUT:g} GeV"
+    suffix  = "_no_activity_cut" if act_cut is None else ""
+    fig.suptitle(f"{args.analysis}: signal vs $K_L$ -- full selection, {act_txt}", fontsize=13)
     fig.tight_layout()
-    out = args.out or f"plots/sig_vs_bkg_{args.analysis}.png"
+    out = args.out or f"plots/sig_vs_bkg_{args.analysis}{suffix}.png"
     import os
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     fig.savefig(out, dpi=140)
     print("wrote", out)
 
