@@ -1,0 +1,21 @@
+{
+    "era": "run3",
+    "analysis_mode": "parking",
+    "lumi": 312,
+
+    "tracker_decay_cut": {"value": true},
+    "mask_eta":   {"value": true, "eta_range": [0, 2.5]},
+    "mask_vbf":   {"value": true, "lead_pt": 105.0, "sub_pt": 40.0, "mjj": 720.0, "deta": 3.0},
+    "mask_merge": {"value": true, "delta_r_max": 0.3},
+    "use_tracks": true,
+
+    "mask_convert":      {"value": false},
+    "mask_separation":   {"value": false},
+    "mask_displacement": {"value": false},
+    "phase2_cuts": {"sep_cut": 1e-4, "disp_cut": 1e-2, "track_resolution": 4e-5},
+
+    "activity_cut": {"value": true, "cut_value": 5.0},
+    "alp_pT_cut":   {"value": false, "cut_value": 0.0},
+
+    "signal": {"masses": [0.01, 0.1, 1.0, 10.0], "gagg": {"0.01": 1e-4, "0.1": 1e-4, "1.0": 1e-4, "10.0": 1e-4}}
+}

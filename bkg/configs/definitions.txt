@@ -1,0 +1,22 @@
+Signal-vs-K_L plot configs (bkg/configs/)
+Cut values: run3 from config7, phase2 from config10.
+run3  -> hard K_L sample (kl_vbf_sample.csv), lumi 312 fb^-1
+phase2 -> soft K_L sample (kl_sample.csv),   lumi 3000 fb^-1
+
+#          era     selection                                  K_L sample
+config1    run3    only VBF (105/40/720/3)                    hard (kl_vbf_sample.csv)
+config2    phase2  no cuts                                    soft (kl_sample.csv)
+config3    run3    only hadronic activity <= 5 GeV            hard
+config4    phase2  only hadronic activity <= 5 GeV            soft
+config5    run3    full config7 chain, no activity            hard
+config6    phase2  full config10 chain, no activity           soft
+config7    run3    full config7 chain + activity <= 5 GeV     hard
+config8    phase2  full config10 chain + activity <= 5 GeV    soft
+config9    run3    only VBF (105/40/720/3) + activity <= 5 GeV hard
+
+Full run3 chain (config7):  tracker-decay + eta[0,2.5] + VBF(105/40/720/3) + merge(dR<0.3, use_tracks)
+Full phase2 chain (config10): tracker-decay + eta[1.4,3.0] + merge(dR<=0.3) + both-convert + separation(>=1e-4) + displacement(>=1e-2)  [track_res 4e-5]
+
+Submit all 8, full K_L (from bkg/):
+  sbatch --export=ALL,MAXKL=0 slurm/submit_sig_vs_bkg.slurm
+Outputs: plots/config1.png ... plots/config8.png
