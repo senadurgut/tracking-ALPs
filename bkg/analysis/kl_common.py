@@ -25,8 +25,8 @@ from module_VBF import (
     displaced_vertex_TRT as _displaced_vertex_TRT, # scalar; vectorized over bins below
 )
 
-separation_TRT       = np.vectorize(_separation_TRT)
-displaced_vertex_TRT = np.vectorize(_displaced_vertex_TRT)
+separation_TRT       = np.vectorize(_separation_TRT, otypes=[float])        # otypes -> safe on empty input
+displaced_vertex_TRT = np.vectorize(_displaced_vertex_TRT, otypes=[float])
 
 # ----------------------------------------------------------------------
 # constants (PDG)
