@@ -1,18 +1,22 @@
 """
-Signal (ALP->gg, VBF) vs background (K_L->gg) distributions in the three discriminating
-observables -- diphoton mass, diphoton pT, reconstructed displacement b~ -- AFTER the full
-config7/config10 selection, PLUS a hadronic-activity == 0 requirement on the background.
+Signal (ALP->gg, VBF) vs background (K_L->gg): 3x3 figure. Columns are the three observables --
+diphoton pT (log-x), diphoton pT (linear-x), and reconstructed displacement b~. The top row shows
+fraction-per-bin (unit-area shape) and the middle row the same observables as events @ lumi / bin.
+The bottom-left panel is text: the exact selection, K_L counts + yield, and signal survivors + yields.
 
-Shape-normalized (unit area): shows discrimination power, not rate. Signal shown at a few masses;
-K_L only ever lives at m_gg = 0.498 GeV.
+CONFIG-DRIVEN: every cut is an independent on/off toggle with a value, set in a JSON config under
+bkg/configs/ (config7-style schema, extended -- see bkg/configs/README.md). Vary cuts across configs
+to produce different plots. `--analysis run3|phase2` is a shortcut for bkg/configs/<era>_nominal.json.
 
-Selection is a faithful copy of analyze_configurable_v2.py `count_passing` (signal) and of
-run3_parking.py / phase2_scouting.py (K_L). Displacement follows notebooks/displacement.py:
-signal uses the MEAN decay length ev['a']['l']; K_L uses the SAMPLED decay position (both go into
-displaced_vertex_TRT). Both require the two photons to convert (displacement is only defined then).
+Selection mirrors analyze_configurable_v2.py `count_passing` (signal) and run3_parking.py /
+phase2_scouting.py (K_L). Displacement follows notebooks/displacement.py: signal uses the MEAN decay
+length ev['a']['l']; K_L uses the SAMPLED decay position (both into displaced_vertex_TRT); the b~
+observable needs the two photons to convert. The displacement panel is a coupling scan for one
+representative mass (benchmark g + 1e-3 + 1e-2, distinguished by linestyle), since b~ ~ 1/g^2.
 
-Run (heavy -- send to SLURM or a node):  python plot_sig_vs_bkg.py --analysis run3
-                                          python plot_sig_vs_bkg.py --analysis phase2
+Run (heavy -- send to SLURM or a node):
+    python plot_sig_vs_bkg.py --analysis run3
+    python plot_sig_vs_bkg.py --config bkg/configs/run3_novbf.json --max-kl 0
 """
 import argparse
 import json
@@ -24,6 +28,15 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+plt.rcParams.update({                            # publication style (matches the standalone pT plots)
+    "font.size": 13, "font.family": "serif", "mathtext.fontset": "cm",
+    "axes.linewidth": 1.0,
+    "xtick.direction": "in", "ytick.direction": "in",
+    "xtick.top": True, "ytick.right": True,
+    "xtick.minor.visible": True, "ytick.minor.visible": True,
+    "figure.dpi": 120, "savefig.dpi": 300, "savefig.bbox": "tight",
+})
 
 _BKG = Path(__file__).resolve().parent.parent    # tracking_ALPs/bkg (data/ lives here)
 TRACKING = "/home/export/sdurgut/scratch/alps/tracking_ALPs"
@@ -37,58 +50,99 @@ from scripts.analysis_helpers.file_helpers import ma_to_name
 from scripts.analysis_helpers.kinematics_helpers import compute_mjj
 
 M_KL      = 0.497611
-TRACK_RES = 4e-5
-USE_TRACKS = True                    # merged bin (dR<cell) resolved via conversion, as in run3_parking.py
-ACT_CUT   = 0.0                      # keep events with hadronic activity <= ACT_CUT (0 = perfectly isolated)
-SIG_MASSES = [0.3, 0.5, 1.0]         # GeV
-GAGG_BENCH = {0.3: 8.0e-5, 0.5: 2.63e-5, 1.0: 6.4e-6}   # displaced-in-tracker benchmark per mass
+TRACK_RES = 4e-5                     # default track resolution if a config's phase2_cuts omits it
 N_GEN     = 40000
 BR_KL_GG     = 5.47e-4               # Br(K_L -> gamma gamma)
 SIG_XSEC_1E2 = 180.0                 # sigma_VBF(a) [pb] at gagg=1e-2 GeV^-1 (~gagg^2, Br(a->gg)=1)
-C_SIG     = {0.3: "#0072B2", 0.5: "#009E73", 1.0: "#E69F00"}   # Okabe-Ito, fixed per mass
-
-ANALYSES = {
-    "run3":   dict(era="run3",   config=TRACKING + "/configs/config7.json",
-                   sample="data/kl_vbf_sample.csv",  iso_col="kl_iso_had_pt", hard=True,  lumi=312,
-                   kl_sigma_pb=3.6413e-3 * 1e9, kl_ngen=20e6),   # sigma_hard(pThat>80); N_HARD (VBF baked in)
-    "phase2": dict(era="phase2", config=TRACKING + "/configs/config10.json",
-                   sample="data/kl_sample.csv",      iso_col="iso_had_pt",    hard=False, lumi=3000,
-                   kl_sigma_pb=78.585e9,        kl_ngen=2e6),    # sigma_inel; N_SOFT
+SIG_MASSES_DEFAULT = [0.3, 0.5, 1.0]                             # used when a config omits "signal"
+GAGG_BENCH_DEFAULT = {0.3: 8.0e-5, 0.5: 2.63e-5, 1.0: 6.4e-6}   # displaced-in-tracker benchmark per mass
+DISP_MASS          = 0.5                # reconstructed-displacement panel: FIXED representative mass (GeV).
+DISP_SCAN_FACTORS  = [1.0, 3.0, 10.0]   # displacement-panel couplings as MULTIPLES of the DISP_MASS benchmark g.
+                                        # Relative (not absolute like 1e-3/1e-2) so the curves stay in the
+                                        # b~ window across eras: absolute large g -> prompt decay (b~ below
+                                        # tracker resolution) and empty curves, which hit run3 hardest since
+                                        # the VBF cut leaves too few survivors to populate the b~>0 tail.
+# era -> K_L sample + normalization. The sample choice is FIXED per era (run3 = VBF-triggered hard
+# sample with VBF baked in; phase2 = inclusive soft sample). Config `lumi` overrides the default.
+ERA_PARAMS = {
+    "run3":   dict(sample="data/kl_vbf_sample.csv", iso_col="kl_iso_had_pt", hard=True,
+                   kl_sigma_pb=3.6413e-3 * 1e9, kl_ngen=20e6, lumi=312,  eta_max_conv=2.5),
+    "phase2": dict(sample="data/kl_sample.csv",     iso_col="iso_had_pt",    hard=False,
+                   kl_sigma_pb=78.585e9,        kl_ngen=2e6,  lumi=3000, eta_max_conv=3.0),
 }
+CONFIG_DIR     = _BKG / "configs"                                # plot configs live here
+NOMINAL_CONFIG = {"run3": "run3_nominal.json", "phase2": "phase2_nominal.json"}   # --analysis shortcuts
 
-def selection_lines(cfg, cuts, act_cut):
-    """Human-readable list of the cuts applied (for the text panel)."""
+def _w(x):
+    """Per-entry weight so a step histogram shows FRACTION of events per bin. Correct on log-x axes,
+       unlike density=True (which divides by linear bin width and spikes narrow low-value bins)."""
+    return np.full(len(x), 1.0 / len(x)) if len(x) else None
+
+
+def gfmt(g):
+    """g_agg as a LaTeX string: 10^{n} for a clean power of ten, else scientific."""
+    e = int(round(np.log10(g)))
+    return rf"10^{{{e}}}" if np.isclose(g, 10.0 ** e) else f"{g:.2g}"
+
+
+def selection_lines(cfg, cuts):
+    """One line per cut: 'ON <value>' / 'OFF' -- reflects exactly what the config applied."""
+    def onoff(flag, detail=""):
+        return ("ON   " + detail).rstrip() if flag else "OFF"
     lo, hi = cuts["eta_range"]
-    L = ["in-tracker decay (always on)",
-         f"eta in [{lo}, {hi}]  (both photons)"]
+    vbf_d = (f"lead>{cuts['leading_jet_pt_cut']:.0f} sub>{cuts['sub_jet_pt_cut']:.0f} "
+             f"mjj>{cuts['mjj_cut']:.0f} |dEta|>{cuts['deta_cut']:.0f}")
     if cfg["era"] == "run3":
-        L += ["VBF: baked into K_L sample; applied to signal:",
-              f"     lead>{cuts['leading_jet_pt_cut']:.0f}, sub>{cuts['sub_jet_pt_cut']:.0f}, "
-              f"mjj>{cuts['mjj_cut']:.0f}, |dEta|>{cuts['deta_cut']:.0f}",
-              f"merge: dR < {cuts['delta_r_max']}  (dR<{cuts['ecal_cell_size']} needs both convert)"]
-    else:
-        L += [f"merge: dR <= {cuts['delta_r_max']}", "both photons convert",
-              f"separation_TRT >= {cuts['sep_cut']:g} m",
-              f"displaced_vertex_TRT >= {cuts['disp_cut']:g} m  (res {cuts['track_resolution']:g} m)"]
-    L.append(f"hadronic activity: {'<= %g GeV' % act_cut if act_cut is not None else 'NO CUT'}")
-    return L
+        vbf_d += "  [+baked into K_L]"
+    eta_d   = f"[{lo}, {hi}] both photons"
+    merge_d = f"<= {cuts['delta_r_max']}  (cell {cuts['ecal_cell_size']}, use_tracks={cuts['use_tracks']})"
+    sep_d   = f">= {cuts['sep_cut']:g} m"
+    disp_d  = f">= {cuts['disp_cut']:g} m (res {cuts['track_resolution']:g})"
+    act_d   = f"<= {cuts['act_cut']:g} GeV"
+    pt_d    = f"> {cuts['pT_cut']:g} GeV"
+    return [f"in-tracker decay : {onoff(cuts['mask_tracker_decay'])}",
+            f"eta              : {onoff(cuts['mask_eta'], eta_d)}",
+            f"VBF (signal)     : {onoff(cuts['mask_vbf'], vbf_d)}",
+            f"merge dR         : {onoff(cuts['mask_merge'], merge_d)}",
+            f"both convert     : {onoff(cuts['mask_convert'])}",
+            f"separation       : {onoff(cuts['mask_separation'], sep_d)}",
+            f"displacement     : {onoff(cuts['mask_displacement'], disp_d)}",
+            f"hadronic activity: {onoff(cuts['mask_activity'], act_d)}",
+            f"alp pT           : {onoff(cuts['mask_alp_pT'], pt_d)}"]
 
 
 def load_cuts(path):
-    """Resolve the config JSON to the cut params used here (mirrors analyze_configurable_v2.resolve_cuts
-       for the fields we need; use_tracks pinned to USE_TRACKS for signal/background consistency)."""
+    """Resolve a plot-config JSON to the cut params used here. Mirrors analyze_configurable_v2.resolve_cuts
+       for the shared fields and adds granular plot toggles (convert/separation/displacement/activity/pT).
+       Backward compatible: an unextended config7/config10 reproduces the original selection because the
+       convert/separation/displacement toggles default to (analysis_mode == 'scouting'). Not imported from
+       analyze_configurable_v2 because that module pulls in `yaml` (absent in this env)."""
     with open(path) as f:
         c = json.load(f)
+    mode  = c.get("analysis_mode", "parking")
+    scout = (mode == "scouting")
     em, vm, mm, p2 = (c.get(k, {}) for k in ("mask_eta", "mask_vbf", "mask_merge", "phase2_cuts"))
+    conv, sep, disp = (c.get(k, {}) for k in ("mask_convert", "mask_separation", "mask_displacement"))
+    act, apt, tdc = (c.get(k, {}) for k in ("activity_cut", "alp_pT_cut", "tracker_decay_cut"))
+    sig = c.get("signal", {})
+    masses  = [float(x) for x in sig.get("masses", SIG_MASSES_DEFAULT)]
+    gagg_in = {float(k2): float(v2) for k2, v2 in sig.get("gagg", {}).items()}
     return dict(
-        era=c["era"], analysis_mode=c.get("analysis_mode", "parking"),
+        era=c["era"], analysis_mode=mode, lumi=c.get("lumi"),
+        mask_tracker_decay=tdc.get("value", True),
         mask_eta=em.get("value", False), eta_range=em.get("eta_range", [0.0, 0.0]),
         mask_vbf=vm.get("value", False), leading_jet_pt_cut=vm.get("lead_pt", 0.0),
         sub_jet_pt_cut=vm.get("sub_pt", 0.0), mjj_cut=vm.get("mjj", 0.0), deta_cut=vm.get("deta", 0.0),
         mask_merge=mm.get("value", True), delta_r_max=mm.get("delta_r_max", 0.3),
-        ecal_cell_size=0.025, use_tracks=USE_TRACKS,
+        ecal_cell_size=0.025, use_tracks=c.get("use_tracks", True),
+        mask_convert=conv.get("value", scout), mask_separation=sep.get("value", scout),
+        mask_displacement=disp.get("value", scout),
         sep_cut=p2.get("sep_cut", 5e-4), disp_cut=p2.get("disp_cut", 1e-1),
-        track_resolution=p2.get("track_resolution", 2e-4),
+        track_resolution=p2.get("track_resolution", TRACK_RES),
+        mask_activity=act.get("value", False), act_cut=act.get("cut_value", 0.0),
+        mask_alp_pT=apt.get("value", False), pT_cut=apt.get("cut_value", 0.0),
+        masses=masses,
+        gagg={m: gagg_in.get(m, GAGG_BENCH_DEFAULT.get(m, 1e-5)) for m in masses},
     )
 
 
@@ -106,13 +160,18 @@ def merge_pass_signal(ev, cuts, i_g, dR):
 
 
 def select_signal(events, cuts):
-    """Full config selection at i_g=0; return (pt[], m_gg[], disp[]) for survivors.
-       disp only filled for survivors whose two photons convert (else that event is dropped
-       from the displacement array only)."""
+    """Config-driven selection at i_g=0; return (pt[], disp[]) for survivors. Each cut is an
+       independent toggle. disp is only filled for survivors whose two photons convert (the
+       observable needs tracks), regardless of whether the displacement CUT is on."""
     i_g, pt, disp = 0, [], []
+    need_conv = cuts["mask_convert"] or cuts["mask_separation"] or cuts["mask_displacement"]
+    tr = cuts["track_resolution"]
     for ev in events:
-        if -ev["a"]["l"][i_g] * np.log(np.random.uniform()) >= TRT_length(ev["a"]["eta"]):
-            continue                                                        # in-tracker decay
+        if cuts["mask_tracker_decay"]:
+            if -ev["a"]["l"][i_g] * np.log(np.random.uniform()) >= TRT_length(ev["a"]["eta"]):
+                continue                                                    # in-tracker decay
+        if cuts["mask_alp_pT"] and ev["a"]["pt"] <= cuts["pT_cut"]:
+            continue                                                        # alp pT
         e1, e2 = ev["g1"]["eta"], ev["g2"]["eta"]
         if cuts["mask_eta"]:
             lo, hi = cuts["eta_range"]
@@ -130,21 +189,20 @@ def select_signal(events, cuts):
             if not merge_pass_signal(ev, cuts, i_g, dR):
                 continue
         both_conv = ev["g1"]["conv"][i_g] and ev["g2"]["conv"][i_g]
-        if cuts["analysis_mode"] == "scouting":
-            if not both_conv:
-                continue
+        if need_conv and not both_conv:
+            continue                                                        # both photons convert
+        if cuts["mask_separation"]:
             if separation_TRT(e1, e2, ev["a"]["eta"], ev["g1"]["phi"], ev["g2"]["phi"],
                               ev["a"]["phi"], l_a) < cuts["sep_cut"]:
                 continue
+        if cuts["mask_displacement"]:
             if displaced_vertex_TRT(ev["a"]["eta"], ev["g1"]["phi"], ev["g2"]["phi"], ev["a"]["phi"],
-                                    ev["g1"]["l_track"][i_g], ev["g2"]["l_track"][i_g], l_a,
-                                    cuts["track_resolution"]) < cuts["disp_cut"]:
+                                    ev["g1"]["l_track"][i_g], ev["g2"]["l_track"][i_g], l_a, tr) < cuts["disp_cut"]:
                 continue
         pt.append(ev["a"]["pt"])
         if both_conv:
             disp.append(displaced_vertex_TRT(ev["a"]["eta"], ev["g1"]["phi"], ev["g2"]["phi"],
-                        ev["a"]["phi"], ev["g1"]["l_track"][i_g], ev["g2"]["l_track"][i_g],
-                        l_a, TRACK_RES))
+                        ev["a"]["phi"], ev["g1"]["l_track"][i_g], ev["g2"]["l_track"][i_g], l_a, tr))
     return np.array(pt), np.array(disp)
 
 
@@ -153,7 +211,7 @@ def select_kl(cfg, cuts, rng, max_rows, tick, act_cut, chunk=250_000):
        threshold, None disables it). max_rows caps rows read (0 = all). Returns (pt[], disp[], n_read)."""
     cols = (["kl_pt", "kl_eta", "kl_phi", "g1_eta", "g1_phi", "g2_eta", "g2_phi", cfg["iso_col"]]
             if cfg["hard"] else ["pt", "eta", "phi", cfg["iso_col"]])
-    P_conv = kl.make_pconv(cfg["era"], cuts["eta_range"][1])
+    P_conv = kl.make_pconv(cfg["era"], cfg["eta_max_conv"])
     pt_all, b_all, total = [], [], 0
     for df in pd.read_csv(_BKG / cfg["sample"], usecols=cols, chunksize=chunk):   # stream: bounded memory
         if max_rows and total >= max_rows:
@@ -171,8 +229,8 @@ def select_kl(cfg, cuts, rng, max_rows, tick, act_cut, chunk=250_000):
 
 
 def _select_chunk(df, cfg, cuts, rng, P_conv, act_cut):
-    """Vectorized K_L selection on one chunk; returns (pt_surv[], disp[]). Run 3 merged bin
-       (dR<cell) requires both convert (use_tracks=True, as in run3_parking.py)."""
+    """Vectorized K_L selection on one chunk; returns (pt_surv[], disp[]). Cuts are independent
+       toggles, mirroring select_signal. Run 3 merged bin (dR<cell) needs both convert when use_tracks."""
     act = pd.to_numeric(df[cfg["iso_col"]], errors="coerce").to_numpy()
     if cfg["hard"]:
         pt_k, eta_k, phi_k = df["kl_pt"].to_numpy(), df["kl_eta"].to_numpy(), df["kl_phi"].to_numpy()
@@ -183,66 +241,92 @@ def _select_chunk(df, cfg, cuts, rng, P_conv, act_cut):
         theta = 2.0 * np.arctan(np.exp(-eta_k))
         e1, f1, e2, f2 = kl.decay_kl_to_gg(pt_k * np.cosh(eta_k), theta, rng)
 
+    n = len(pt_k)
     p = pt_k * np.cosh(eta_k)
     L = TRT_length(eta_k)
-    decay_dist = -(p / M_KL) * kl.CTAU_KL * np.log(rng.uniform(size=len(p)))
+    decay_dist = -(p / M_KL) * kl.CTAU_KL * np.log(rng.uniform(size=n))
+    tr = cuts["track_resolution"]
     lo, hi = cuts["eta_range"]
-    act_ok = np.ones(len(p), dtype=bool) if act_cut is None else (act <= act_cut)
-    keep = (act_ok & (L > 0) & (decay_dist < L)                             # activity + in-tracker decay
-            & (np.abs(e1) >= lo) & (np.abs(e1) <= hi)
-            & (np.abs(e2) >= lo) & (np.abs(e2) <= hi))                      # mask_eta
 
-    # binary conversion of both photons (decay-position corrected); gates displacement everywhere,
-    # and is a hard cut for scouting + the run3 merged bin.
-    both = ((rng.uniform(size=len(p)) < kl.conv_prob_disp(P_conv, e1, decay_dist))
-            & (rng.uniform(size=len(p)) < kl.conv_prob_disp(P_conv, e2, decay_dist)))
-    l1 = np.where(both, L - rng.uniform(decay_dist, np.maximum(L, decay_dist), size=len(p)), 0.0)
-    l2 = np.where(both, L - rng.uniform(decay_dist, np.maximum(L, decay_dist), size=len(p)), 0.0)
+    act_ok = np.ones(n, dtype=bool) if act_cut is None else (act <= act_cut)
+    intrk  = ((L > 0) & (decay_dist < L)) if cuts["mask_tracker_decay"] else np.ones(n, dtype=bool)
+    eta_ok = (((np.abs(e1) >= lo) & (np.abs(e1) <= hi) & (np.abs(e2) >= lo) & (np.abs(e2) <= hi))
+              if cuts["mask_eta"] else np.ones(n, dtype=bool))
+    pt_ok  = (pt_k > cuts["pT_cut"]) if cuts["mask_alp_pT"] else np.ones(n, dtype=bool)
+    keep = act_ok & intrk & eta_ok & pt_ok
 
-    dR = kl.delta_R_disp(e1, e2, f1, f2, decay_dist)
-    if cfg["era"] == "run3":                                               # parking merge (config7)
-        merged = dR < cuts["ecal_cell_size"]
-        keep &= np.where(merged, both, dR < cuts["delta_r_max"])           # merged->2conv, else dR<max
-    else:                                                                  # scouting merge (config10)
-        keep &= dR <= cuts["delta_r_max"]
-        keep &= both                                                       # scouting: both convert always
-        sep, dsp = np.zeros(len(p)), np.zeros(len(p))
+    # binary conversion of both photons (decay-position corrected)
+    both = ((rng.uniform(size=n) < kl.conv_prob_disp(P_conv, e1, decay_dist))
+            & (rng.uniform(size=n) < kl.conv_prob_disp(P_conv, e2, decay_dist)))
+    l1 = np.where(both, L - rng.uniform(decay_dist, np.maximum(L, decay_dist), size=n), 0.0)
+    l2 = np.where(both, L - rng.uniform(decay_dist, np.maximum(L, decay_dist), size=n), 0.0)
+
+    if cuts["mask_merge"]:
+        dR = kl.delta_R_disp(e1, e2, f1, f2, decay_dist)
+        if cfg["era"] == "run3":                                           # parking merge (config7)
+            merged = dR < cuts["ecal_cell_size"]
+            keep &= np.where(merged, both if cuts["use_tracks"] else False, dR < cuts["delta_r_max"])
+        else:                                                              # scouting merge (config10)
+            keep &= dR <= cuts["delta_r_max"]
+
+    if cuts["mask_convert"] or cuts["mask_separation"] or cuts["mask_displacement"]:
+        keep &= both                                                       # both photons convert
+    if cuts["mask_separation"] or cuts["mask_displacement"]:
+        sep, dsp = np.zeros(n), np.zeros(n)
         sep[keep] = kl.separation_TRT(e1[keep], e2[keep], eta_k[keep], f1[keep], f2[keep],
                                       phi_k[keep], decay_dist[keep])
         dsp[keep] = kl.displaced_vertex_TRT(eta_k[keep], f1[keep], f2[keep], phi_k[keep],
-                                            l1[keep], l2[keep], decay_dist[keep], TRACK_RES)
-        keep &= (sep >= cuts["sep_cut"]) & (dsp >= cuts["disp_cut"])
+                                            l1[keep], l2[keep], decay_dist[keep], tr)
+        if cuts["mask_separation"]:
+            keep &= (sep >= cuts["sep_cut"])
+        if cuts["mask_displacement"]:
+            keep &= (dsp >= cuts["disp_cut"])
 
     disp_mask = keep & both
     b = kl.displaced_vertex_TRT(eta_k[disp_mask], f1[disp_mask], f2[disp_mask], phi_k[disp_mask],
-                                l1[disp_mask], l2[disp_mask], decay_dist[disp_mask], TRACK_RES)
+                                l1[disp_mask], l2[disp_mask], decay_dist[disp_mask], tr)
     return pt_k[keep], np.asarray(b)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--analysis", choices=list(ANALYSES), required=True)
+    import os
+    ap = argparse.ArgumentParser(description="Config-driven signal-vs-K_L discriminator plots.")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--config", help="path to a plot config JSON (see bkg/configs/)")
+    src.add_argument("--analysis", choices=list(NOMINAL_CONFIG),
+                     help="shortcut for bkg/configs/<era>_nominal.json")
     ap.add_argument("--max-kl", type=int, default=400000, help="cap K_L rows read (0 = all; yields exact only then)")
-    ap.add_argument("--no-activity-cut", action="store_true", help="drop the hadronic-activity requirement")
+    ap.add_argument("--no-activity-cut", action="store_true", help="force the activity cut OFF (overrides the config)")
     ap.add_argument("--chunk", type=int, default=250_000, help="CSV read chunk size (lower on tight-memory nodes)")
+    ap.add_argument("--norm", choices=["fraction", "events"], default="fraction",
+                    help="DEPRECATED / ignored: both fraction (top row) and events @ lumi (middle row) are always drawn")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    cfg = ANALYSES[args.analysis]
-    cuts = load_cuts(cfg["config"])
-    act_cut = None if args.no_activity_cut else ACT_CUT
+
+    config_path = args.config or str(CONFIG_DIR / NOMINAL_CONFIG[args.analysis])
+    stem = Path(config_path).stem
+    cuts = load_cuts(config_path)
+    era = cuts["era"]
+    cfg = dict(ERA_PARAMS[era], era=era)
+    if cuts["lumi"] is not None:
+        cfg["lumi"] = cuts["lumi"]
+    masses, gaggs = cuts["masses"], cuts["gagg"]
+    _sig_colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(masses)))     # match signal_plots.ipynb
+    C_SIG = {ma: _sig_colors[i] for i, ma in enumerate(sorted(masses))}    # ascending mass -> low->high viridis
+    act_cut = None if args.no_activity_cut else (cuts["act_cut"] if cuts["mask_activity"] else None)
+
     t0 = time.time()
     def tick(m): print(f"  [{time.time()-t0:6.1f}s] {m}", flush=True)
-
     rng = np.random.default_rng(0)
-    tick(f"=== {args.analysis} (era={cfg['era']}) ===  activity_cut={act_cut}")
+    tick(f"=== {stem} (era={era}) ===  activity_cut={act_cut}")
     np.random.seed(1234)
     kl_pt, kl_b, kl_read = select_kl(cfg, cuts, rng, args.max_kl, tick, act_cut, args.chunk)
 
     sig = {}
-    for ma in SIG_MASSES:
+    for ma in masses:
         np.random.seed(1234)
         raw = read_data(ma_to_name(ma), num=N_GEN, data_dir=TRACKING + "/data/cmsrun3-csvs")
-        events = raw_to_events(raw, gaggs=[GAGG_BENCH[ma]], ma=ma, era=cfg["era"])
+        events = raw_to_events(raw, gaggs=[gaggs[ma]], ma=ma, era=era)
         sig[ma] = select_signal(events, cuts)
         tick(f"signal m_a={ma}: {len(sig[ma][0]):,} survivors, {len(sig[ma][1]):,} with displacement")
 
@@ -250,77 +334,98 @@ def main():
     w_kl = cfg["kl_sigma_pb"] / cfg["kl_ngen"] * cfg["lumi"] * 1000.0 * BR_KL_GG
     N_kl = len(kl_pt) * w_kl
     def sig_yield(ma):
-        g = GAGG_BENCH[ma]
-        return len(sig[ma][0]) / N_GEN * cfg["lumi"] * 1000.0 * SIG_XSEC_1E2 * (g / 1e-2) ** 2
+        return len(sig[ma][0]) / N_GEN * cfg["lumi"] * 1000.0 * SIG_XSEC_1E2 * (gaggs[ma] / 1e-2) ** 2
+    def w_sig_g(g):                                                         # per-event physical weight at coupling g
+        return cfg["lumi"] * 1000.0 * SIG_XSEC_1E2 * (g / 1e-2) ** 2 / N_GEN
+    def w_sig(ma):                                                          # per-event physical weight
+        return w_sig_g(gaggs[ma])
+    def hw(x, w_evt, norm):                                                # histogram weights per normalization
+        if not len(x):
+            return None
+        return np.full(len(x), w_evt) if norm == "events" else _w(x)
+    def ylab_for(norm):
+        return (rf"events @ {cfg['lumi']:g} fb$^{{-1}}$ / bin" if norm == "events" else "fraction / bin")
 
-    fig, ((axm, axp), (axd, axt)) = plt.subplots(2, 2, figsize=(13, 9))
+    def draw_pt(ax, bins, xscale, title, norm):
+        for ma in masses:
+            if len(sig[ma][0]):
+                ax.hist(sig[ma][0], bins=bins, weights=hw(sig[ma][0], w_sig(ma), norm), histtype="step",
+                        lw=2, color=C_SIG[ma],
+                        label=rf"ALP $m_a={ma}$ GeV, $g={gfmt(gaggs[ma])}$")
+        if len(kl_pt):
+            ax.hist(kl_pt, bins=bins, weights=hw(kl_pt, w_kl, norm), histtype="step", lw=2.2,
+                    color="black", ls="--", label=r"$K_L$")
+        ax.set_xscale(xscale); ax.set_yscale("log")
+        ax.set_xlabel(r"diphoton $p_T$ [GeV]"); ax.set_ylabel(ylab_for(norm)); ax.set_title(title, fontsize=10)
+        ax.legend(fontsize=8, frameon=False); ax.grid(True, which="both", alpha=0.15)
 
-    # --- mass ---
-    mbins = np.linspace(0.0, 1.2, 121)
-    for ma in SIG_MASSES:
-        if len(sig[ma][0]):
-            axm.hist(np.full(len(sig[ma][0]), ma), bins=mbins, density=True, histtype="step",
-                     lw=2, color=C_SIG[ma], label=rf"ALP $m_a={ma}$ GeV")
-    axm.hist(np.full(len(kl_pt), M_KL), bins=mbins, density=True, histtype="step", lw=2.2,
-             color="black", ls="--", label=r"$K_L$")
-    axm.set_xlabel(r"diphoton mass $m_{\gamma\gamma}$ [GeV]"); axm.set_ylabel("normalized / bin")
-    axm.legend(fontsize=8, frameon=False); axm.grid(True, alpha=0.15)
-
-    # --- pT ---
-    pbins = np.logspace(-1, 2.7, 60)
-    for ma in SIG_MASSES:
-        if len(sig[ma][0]):
-            axp.hist(sig[ma][0], bins=pbins, density=True, histtype="step", lw=2,
-                     color=C_SIG[ma], label=rf"ALP $m_a={ma}$ GeV")
-    if len(kl_pt):
-        axp.hist(kl_pt, bins=pbins, density=True, histtype="step", lw=2.2, color="black", ls="--",
-                 label=r"$K_L$")
-    axp.set_xscale("log"); axp.set_yscale("log")
-    axp.set_xlabel(r"diphoton $p_T$ [GeV]"); axp.set_ylabel("normalized / bin")
-    axp.legend(fontsize=8, frameon=False); axp.grid(True, which="both", alpha=0.15)
-
-    # --- displacement ---
+    # --- displacement: FIXED mass (DISP_MASS), coupling scan (benchmark x DISP_SCAN_FACTORS) ---
+    # b~ shifts with coupling because the decay length scales as ~1/g^2 (larger g -> shorter, smaller b~).
+    # Mass is held fixed (not the pT-panel masses) so the panel is a clean 1/g^2 coupling scan; couplings
+    # are multiples of the DISP_MASS benchmark so the curves stay near the displaced-in-tracker regime.
+    disp_mass   = DISP_MASS
+    disp_gbench = GAGG_BENCH_DEFAULT.get(disp_mass, 1e-5)
+    disp_color  = plt.cm.viridis(0.5)
+    def disp_at_gagg(ma, g):                                               # re-run the signal selection at coupling g
+        np.random.seed(1234)
+        raw = read_data(ma_to_name(ma), num=N_GEN, data_dir=TRACKING + "/data/cmsrun3-csvs")
+        _, b = select_signal(raw_to_events(raw, gaggs=[g], ma=ma, era=era), cuts)
+        return b
+    scan_gs = sorted({disp_gbench * f for f in DISP_SCAN_FACTORS})
     dbins = np.logspace(-5, 0, 50)
-    for ma in SIG_MASSES:
-        b = sig[ma][1]; b = b[b > 0]
-        if len(b):
-            axd.hist(b, bins=dbins, density=True, histtype="step", lw=2, color=C_SIG[ma],
-                     label=rf"ALP $m_a={ma}$ GeV ($g={GAGG_BENCH[ma]:.0e}$)")
-    b = kl_b[kl_b > 0]
-    if len(b):
-        axd.hist(b, bins=dbins, density=True, histtype="step", lw=2.2, color="black", ls="--",
-                 label=r"$K_L$")
-    axd.axvline(1e-2, color="red", ls=":", lw=1.1); axd.axvline(1e-1, color="gray", ls=":", lw=1.1)
-    axd.set_xscale("log"); axd.set_xlabel(r"reconstructed displacement $\tilde{b}$ [m]")
-    axd.set_ylabel("normalized / bin"); axd.legend(fontsize=8, frameon=False)
-    axd.grid(True, which="both", alpha=0.15)
+    disp_curves = []                                                       # precompute once (disp_at_gagg re-reads data)
+    for ls, g in zip(["-", "--", ":", "-."], scan_gs):
+        b = disp_at_gagg(disp_mass, g)
+        disp_curves.append((ls, g, b[b > 0]))
+    kl_b_pos = kl_b[kl_b > 0]
+
+    def draw_disp(ax, norm):
+        for ls, g, b in disp_curves:
+            if len(b):
+                ax.hist(b, bins=dbins, weights=hw(b, w_sig_g(g), norm), histtype="step", lw=2, ls=ls,
+                        color=disp_color, label=rf"ALP $m_a={disp_mass}$ GeV, $g={gfmt(g)}$")
+        if len(kl_b_pos):
+            ax.hist(kl_b_pos, bins=dbins, weights=hw(kl_b_pos, w_kl, norm), histtype="step", lw=2.2,
+                    color="black", ls="--", label=r"$K_L$")
+        ax.axvline(1e-2, color="red", ls=":", lw=1.1); ax.axvline(1e-1, color="gray", ls=":", lw=1.1)
+        ax.set_xscale("log")
+        if norm == "events":
+            ax.set_yscale("log")
+        ax.set_xlabel(r"reconstructed displacement $\tilde{b}$ [m]"); ax.set_ylabel(ylab_for(norm))
+        ax.legend(fontsize=8, frameon=False); ax.grid(True, which="both", alpha=0.15)
+
+    # Two normalizations shown side by side: top row = fraction / bin, middle row = events @ lumi / bin.
+    pt_log_bins = np.logspace(-1, 2.7, 60)
+    pt_lin_bins = np.linspace(0.0, 300.0, 61)
+    fig, axes = plt.subplots(3, 3, figsize=(18, 13))
+    for row, norm in enumerate(("fraction", "events")):
+        draw_pt(axes[row, 0], pt_log_bins, "log",    r"diphoton $p_T$", norm)
+        draw_pt(axes[row, 1], pt_lin_bins, "linear", r"diphoton $p_T$", norm)
+        draw_disp(axes[row, 2], norm)
 
     # --- text panel: selection + counts + yields ---
+    axt = axes[2, 0]
+    axes[2, 1].axis("off"); axes[2, 2].axis("off")
     axt.axis("off")
-    info = [f"{args.analysis}   (config {'7' if cfg['era'] == 'run3' else '10'})",
-            f"lumi = {cfg['lumi']} fb^-1",
-            "", "SELECTION"]
-    info += ["  " + s for s in selection_lines(cfg, cuts, act_cut)]
+    info = [f"config: {stem}", f"era = {era}    lumi = {cfg['lumi']} fb^-1", "", "SELECTION"]
+    info += ["  " + s for s in selection_lines(cfg, cuts)]
     sub = "" if args.max_kl == 0 else "   [SUBSAMPLE -- use --max-kl 0 for full yields]"
     info += ["", "K_L BACKGROUND" + sub,
              f"  rows read : {kl_read:,}",
              f"  survivors : {len(kl_pt):,}",
              f"  w/ 2-conv : {len(kl_b):,}   (enter displacement)",
              f"  yield     : {N_kl:.3e} events",
-             "", "SIGNAL   (survivors / N_gen  ->  yield @ benchmark g)"]
-    for ma in SIG_MASSES:
-        info.append(f"  m={ma} (g={GAGG_BENCH[ma]:.1e}) : {len(sig[ma][0]):>4}/{N_GEN} -> {sig_yield(ma):.2e}")
+             "", "SIGNAL   (survivors / N_gen  ->  yield @ g)"]
+    for ma in masses:
+        info.append(f"  m={ma} (g={gaggs[ma]:.1e}) : {len(sig[ma][0]):>4}/{N_GEN} -> {sig_yield(ma):.2e}")
     axt.text(0.0, 1.0, "\n".join(info), va="top", ha="left", family="monospace",
-             fontsize=9, transform=axt.transAxes)
+             fontsize=8.5, transform=axt.transAxes)
 
-    act_txt = "no activity cut" if act_cut is None else rf"activity $\leq$ {ACT_CUT:g} GeV"
-    suffix  = "_no_activity_cut" if act_cut is None else ""
-    fig.suptitle(f"{args.analysis}: signal vs $K_L$ -- full selection, {act_txt}", fontsize=13)
+    fig.suptitle(f"{stem}: signal vs $K_L$   (era {era})", fontsize=13)
     fig.tight_layout()
-    out = args.out or f"plots/sig_vs_bkg_{args.analysis}{suffix}.png"
-    import os
+    out = args.out or str(_BKG / "plots" / f"{stem}.png")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    fig.savefig(out, dpi=140)
+    fig.savefig(out)
     print("wrote", out)
 
 
