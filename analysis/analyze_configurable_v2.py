@@ -50,7 +50,7 @@ def resolve_cuts(config):
 
     This (together with ``count_passing``) is the single source of truth for the
     physics.  ``analyze_configurable_parallel.py`` imports both, so any change here
-    is automatically used by the per-mass / SLURM-array workflow too.
+
     """
     eta_mask_config   = config.get('mask_eta', {})
     vbf_mask_config   = config.get('mask_vbf', {})
@@ -64,6 +64,9 @@ def resolve_cuts(config):
 
     mask_alp_pT = alp_pT_cut_config.get('value', True)
     mask_merge  = merge_mask_config.get('value', True)
+    # Require the ALP to decay inside the tracker. Default True (previous, hardcoded
+    # behavior); set "tracker_decay_cut": {"value": false} for a no-acceptance baseline.
+    mask_tracker_decay = config.get('tracker_decay_cut', {}).get('value', True)
 
     return {
         'era':           config['era'],
@@ -73,6 +76,7 @@ def resolve_cuts(config):
         'mask_vbf':      vbf_mask_config.get('value', False),
         'mask_merge':    mask_merge,
         'mask_alp_pT':   mask_alp_pT,
+        'mask_tracker_decay': mask_tracker_decay,
         'eta_range':          eta_mask_config.get('eta_range', [0.0, 0.0]),
         'leading_jet_pt_cut': vbf_mask_config.get('lead_pt', 0.0),
         'sub_jet_pt_cut':     vbf_mask_config.get('sub_pt', 0.0),
@@ -98,6 +102,7 @@ def resolved_summary(cuts):
         'mask_vbf': cuts['mask_vbf'],
         'mask_merge': cuts['mask_merge'],
         'mask_alp_pT': cuts['mask_alp_pT'],
+        'mask_tracker_decay': cuts['mask_tracker_decay'],
         'eta_range': cuts['eta_range'],
         'leading_jet_pt_cut': cuts['leading_jet_pt_cut'],
         'sub_jet_pt_cut': cuts['sub_jet_pt_cut'],
@@ -126,6 +131,7 @@ def count_passing(events, gagg_list, cuts):
     mask_vbf        = cuts['mask_vbf']
     mask_merge      = cuts['mask_merge']
     mask_alp_pT     = cuts['mask_alp_pT']
+    mask_tracker_decay = cuts['mask_tracker_decay']
     eta_range       = cuts['eta_range']
     leading_jet_pt_cut = cuts['leading_jet_pt_cut']
     sub_jet_pt_cut  = cuts['sub_jet_pt_cut']
@@ -142,8 +148,11 @@ def count_passing(events, gagg_list, cuts):
 
     for i_g, g in enumerate(gagg_list):
         for i, ev in enumerate(events):
-            passes_pT = (ev['a']['pt'] > pT_cut) if mask_alp_pT else True # currently set to zero, can be changed later if needed 
-            alp_inside_tracker = -ev['a']['l'][i_g] * np.log(np.random.uniform()) < TRT_length(ev['a']['eta'])
+            passes_pT = (ev['a']['pt'] > pT_cut) if mask_alp_pT else True # currently set to zero, can be changed later if needed
+            if mask_tracker_decay:
+                alp_inside_tracker = -ev['a']['l'][i_g] * np.log(np.random.uniform()) < TRT_length(ev['a']['eta'])
+            else:
+                alp_inside_tracker = True
 
             if not (passes_pT and alp_inside_tracker):
                 continue
@@ -158,12 +167,12 @@ def count_passing(events, gagg_list, cuts):
             l1 = ev['g1']['l_track'][i_g]
             l2 = ev['g2']['l_track'][i_g]
             l_a = ev['a']['l'][i_g]
-            if mask_eta: # keep this for now
-                passes_eta_1 = (abs(eta1) >= eta_range[0]) & (abs(eta1) <= eta_range[1]) # keep this for now
-                passes_eta_2 = (abs(eta2) >= eta_range[0]) & (abs(eta2) <= eta_range[1]) # keep this for now
-                if not (passes_eta_1 & passes_eta_2): # keep this for now
-                    continue # keep this for now
-            if mask_vbf: # no need for modification
+            if mask_eta: 
+                passes_eta_1 = (abs(eta1) >= eta_range[0]) & (abs(eta1) <= eta_range[1]) 
+                passes_eta_2 = (abs(eta2) >= eta_range[0]) & (abs(eta2) <= eta_range[1]) 
+                if not (passes_eta_1 & passes_eta_2): 
+                    continue 
+            if mask_vbf: 
                 lead_jet_pt = max(ev['j1']['pt'], ev['j2']['pt'])
                 sub_jet_pt = min(ev['j1']['pt'], ev['j2']['pt'])
                 mjj = compute_mjj(ev)
