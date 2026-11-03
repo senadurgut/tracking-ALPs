@@ -344,10 +344,5 @@ not have them.
 If you use this code, please cite the paper for which it was originally
 developed:
 
-> [Add your paper reference here]
+https://arxiv.org/abs/2609.22570
 
----
-
-## License
-
-[Add your license here]
